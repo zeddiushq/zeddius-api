@@ -82,6 +82,46 @@ Each domain module owns its models, routes (handlers), and repo (sqlx queries). 
 
 ## Conventions
 
+### Rust idioms
+
+**`use` statements**
+- Functions: import the parent module, call as `module::function()`. Makes it clear the function isn't defined locally.
+- Types (structs, enums): import the item directly. PascalCase already signals "this is a type."
+- Traits: import the item directly. You need traits in scope for their methods to work, but you don't call `Trait::method()` explicitly.
+- Macros: import directly. The `!` suffix makes them visually distinct regardless.
+- Modules used as namespaces: import the module (e.g. `use tracing_subscriber::fmt`), call as `fmt::layer()`.
+
+```rust
+use axum::{Router, routing};           // routing = module (has functions inside)
+use tokio::net::TcpListener;           // TcpListener = struct
+use tracing::info;                     // info = macro
+use tracing_subscriber::{EnvFilter, fmt, prelude::*};  // EnvFilter = struct, fmt = module
+```
+
+**Unwrap and error handling**
+- Never call `.unwrap()` in handler code. Handlers return `Result<_, AppError>` and use `?`.
+- In `main`: return `anyhow::Result<()>` and use `?` so startup failures print a clean error and exit non-zero. Do not `unwrap()` in main.
+- When an operation is genuinely infallible by construction (invariant holds because of prior code), use `.expect("why this can't fail")` over silent `.unwrap()`. The message documents the invariant.
+- Use `.context("what was being attempted")?` on startup operations for log observability — not because the error is recoverable, but because "failed to bind to 0.0.0.0:8080 / caused by: address in use" is more useful in Cloud Run logs than a raw OS error code.
+
+```rust
+// main — startup failures propagate cleanly
+let listener = TcpListener::bind("0.0.0.0:8080")
+    .await
+    .context("failed to bind to 0.0.0.0:8080")?;
+info!("listening on {}", listener.local_addr().expect("bound listener has local addr"));
+
+// handler — errors become HTTP responses
+async fn get_user(State(state): State<AppState>, auth: AuthUser) -> Result<Json<User>, AppError> {
+    let user = user_repo::find(&state.db, auth.user_id).await?;
+    Ok(Json(user))
+}
+```
+
+**anyhow vs thiserror**
+- `anyhow` is for application-level error propagation where the caller doesn't need to match on error variants — startup code, internal utilities, `main`. Use `anyhow::Result<T>` and `?` freely.
+- `thiserror` is for `AppError` — the typed error enum that handlers return. It needs concrete variants so `IntoResponse` can map each one to the correct HTTP status and body.
+
 ### Data types
 
 Use `Decimal` (from `rust_decimal`) for all weights and macros. Never `f64`. Use `Uuid` for all IDs. Use `DateTime<Utc>` (from `chrono`) for all timestamps — no naive datetimes.
