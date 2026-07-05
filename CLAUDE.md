@@ -118,6 +118,11 @@ async fn get_user(State(state): State<AppState>, auth: AuthUser) -> Result<Json<
 }
 ```
 
+**Transitive dependencies**
+- Do not add a crate to `Cargo.toml` just because a dependency re-exports it. Use the re-export path instead.
+- `axum` re-exports `http` as `axum::http` — use `axum::http::StatusCode`, not `http::StatusCode`, and don't add `http` to `Cargo.toml`.
+- Only add a crate directly if you need something it doesn't re-export, or if you need to pin its version independently of what your dependencies expect.
+
 **anyhow vs thiserror**
 - `anyhow` is for application-level error propagation where the caller doesn't need to match on error variants — startup code, internal utilities, `main`. Use `anyhow::Result<T>` and `?` freely.
 - `thiserror` is for `AppError` — the typed error enum that handlers return. It needs concrete variants so `IntoResponse` can map each one to the correct HTTP status and body.
