@@ -1,6 +1,9 @@
 use anyhow::anyhow;
-use axum::{Json, response::{IntoResponse, Response}};
 use axum::http::StatusCode;
+use axum::{
+    Json,
+    response::{IntoResponse, Response},
+};
 use serde_json::json;
 use tracing::error;
 
@@ -32,9 +35,11 @@ impl IntoResponse for AppError {
             AppError::Forbidden => (StatusCode::FORBIDDEN, "FORBIDDEN", self.to_string()),
             AppError::NotFound(_) => (StatusCode::NOT_FOUND, "NOT_FOUND", self.to_string()),
             AppError::Conflict(_) => (StatusCode::CONFLICT, "CONFLICT", self.to_string()),
-            AppError::ValidationFailed(_) => {
-                (StatusCode::UNPROCESSABLE_ENTITY, "VALIDATION_FAILED", self.to_string())
-            }
+            AppError::ValidationFailed(_) => (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "VALIDATION_FAILED",
+                self.to_string(),
+            ),
             AppError::Internal(e) => {
                 error!(error = %e, "internal server error");
                 (
@@ -45,7 +50,11 @@ impl IntoResponse for AppError {
             }
         };
 
-        (status, Json(json!({ "error": { "code": code, "message": message } }))).into_response()
+        (
+            status,
+            Json(json!({ "error": { "code": code, "message": message } })),
+        )
+            .into_response()
     }
 }
 
