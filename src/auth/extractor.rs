@@ -4,12 +4,14 @@ use axum::http::request::Parts;
 use uuid::Uuid;
 
 use super::service;
+use crate::domain::user::repo;
 use crate::error::AppError;
 use crate::state::AppState;
 
 #[derive(Clone, Debug)]
 pub struct AuthUser {
     pub user_id: Uuid,
+    pub token_hash: String,
 }
 
 impl FromRequestParts<AppState> for AuthUser {
@@ -31,19 +33,14 @@ impl FromRequestParts<AppState> for AuthUser {
 
         let token_hash = service::hash_token(token);
 
-        let user_id = sqlx::query_scalar!(
-            r#"SELECT user_id as "user_id: Uuid"
-               FROM access_tokens
-               WHERE token_hash = $1
-                 AND revoked_at IS NULL
-                 AND expires_at > now()"#,
-            token_hash
-        )
-        .fetch_optional(&state.db)
-        .await
-        .map_err(AppError::from)?
-        .ok_or(AppError::Unauthorized)?;
+        let user_id = repo::find_id_by_access_token(&state.db, &token_hash)
+            .await
+            .map_err(AppError::from)?
+            .ok_or(AppError::Unauthorized)?;
 
-        Ok(AuthUser { user_id })
+        Ok(AuthUser {
+            user_id,
+            token_hash,
+        })
     }
 }

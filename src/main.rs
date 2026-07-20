@@ -1,15 +1,20 @@
 mod auth;
 mod config;
 mod db;
+mod domain;
 mod error;
 mod state;
 
 use anyhow::Context;
-use axum::{Router, routing};
+use axum::{Json, Router, routing};
+use serde::Serialize;
 use tokio::net::TcpListener;
 use tower_http::trace::TraceLayer;
 use tracing::info;
 use tracing_subscriber::{EnvFilter, fmt, prelude::*};
+
+use config::Config;
+use state::AppState;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -20,13 +25,21 @@ async fn main() -> anyhow::Result<()> {
         .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| "zeddius_api=debug".into()))
         .init();
 
+    let config = Config::from_env()?;
+    let db = db::connect(&config.database_url).await?;
+    let state = AppState::new(db, config);
+    let port = state.config.port;
+
     let app = Router::new()
         .route("/health", routing::get(health))
-        .layer(TraceLayer::new_for_http());
+        .nest("/v1", auth::routes::router())
+        .nest("/v1", domain::user::routes::router())
+        .layer(TraceLayer::new_for_http())
+        .with_state(state);
 
-    let listener = TcpListener::bind("0.0.0.0:8080")
+    let listener = TcpListener::bind(("0.0.0.0", port))
         .await
-        .context("failed to bind to 0.0.0.0:8080")?;
+        .with_context(|| format!("failed to bind to 0.0.0.0:{port}"))?;
     info!(
         "listening on {}",
         listener
@@ -38,6 +51,17 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn health() -> &'static str {
-    "ok"
+#[derive(Serialize)]
+struct HealthResponse {
+    status: &'static str,
+    name: &'static str,
+    version: &'static str,
+}
+
+async fn health() -> Json<HealthResponse> {
+    Json(HealthResponse {
+        status: "ok",
+        name: env!("CARGO_PKG_NAME"),
+        version: env!("CARGO_PKG_VERSION"),
+    })
 }
