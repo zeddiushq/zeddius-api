@@ -82,3 +82,8 @@ pub struct AuthResponse {
     pub refresh_token: String,
     pub user: UserResponse,
 }
+
+#[derive(Debug, Serialize)]
+pub struct UsernameAvailableResponse {
+    pub available: bool,
+}
