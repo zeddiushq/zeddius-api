@@ -1,0 +1,71 @@
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to deploy (e.g. 0.0.1)
+        required: true
+      environment:
+        description: Environment to deploy to
+        required: true
+        type: choice
+        options:
+          - development
+          - production
+
+jobs:
+  deploy:
+    name: Deploy
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Create GitHub App token
+        uses: actions/create-github-app-token@v1
+        id: app-token
+        with:
+          app-id: 3410763
+          private-key: ${{ secrets.ACTIONS_BOT_PRIVATE_KEY }}
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: v${{ inputs.version }}
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Setup GCP
+        uses: zeddiushq/github-actions/setup-gcp@main
+        with:
+          workload_identity_provider: ${{ vars.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.SERVICE_ACCOUNT }}
+
+      - name: Run migrations
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          cargo install sqlx-cli --no-default-features --features rustls,postgres
+          sqlx migrate run
+
+      - name: Deploy to Cloud Run
+        run: |
+          gcloud run deploy zeddius-api \
+            --image us-central1-docker.pkg.dev/${{ vars.GCP_PROJECT }}/docker/zeddius-api:${{ inputs.version }} \
+            --region us-central1 \
+            --project ${{ vars.GCP_PROJECT }} \
+            --service-account ${{ vars.RUNTIME_SERVICE_ACCOUNT }} \
+            --platform managed \
+            --port 8080 \
+            --ingress all \
+            --allow-unauthenticated \
+            --execution-environment gen2 \
+            --memory ${{ vars.CLOUD_RUN_MEMORY }} \
+            --cpu 1 \
+            --min-instances ${{ vars.CLOUD_RUN_MIN_INSTANCES }} \
+            --max-instances ${{ vars.CLOUD_RUN_MAX_INSTANCES }} \
+            --timeout 300 \
+            --set-secrets DATABASE_URL=DATABASE_URL:latest \
+            --quiet
