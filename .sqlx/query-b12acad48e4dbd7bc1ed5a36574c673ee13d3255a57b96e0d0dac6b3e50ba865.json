@@ -1,0 +1,100 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT u.*\n         FROM users u\n         JOIN refresh_tokens rt ON rt.user_id = u.id\n         WHERE rt.token_hash = $1\n           AND rt.revoked_at IS NULL\n           AND rt.expires_at > now()",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "email",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "username",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "display_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "password_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "onboarding_complete",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 6,
+        "name": "height_cm",
+        "type_info": "Float4"
+      },
+      {
+        "ordinal": 7,
+        "name": "birthdate",
+        "type_info": "Date"
+      },
+      {
+        "ordinal": 8,
+        "name": "target_calories",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 9,
+        "name": "target_protein_g",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 10,
+        "name": "target_sleep_hours",
+        "type_info": "Float4"
+      },
+      {
+        "ordinal": 11,
+        "name": "timezone",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 12,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 13,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "b12acad48e4dbd7bc1ed5a36574c673ee13d3255a57b96e0d0dac6b3e50ba865"
+}

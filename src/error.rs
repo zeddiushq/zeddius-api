@@ -13,9 +13,11 @@ pub enum AppError {
     Unauthorized,
 
     #[error("forbidden")]
+    #[allow(dead_code)]
     Forbidden,
 
     #[error("{0} not found")]
+    #[allow(dead_code)]
     NotFound(&'static str),
 
     #[error("conflict: {0}")]

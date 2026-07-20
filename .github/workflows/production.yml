@@ -1,0 +1,72 @@
+name: Production
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - closed
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.merged == true
+    environment: production
+    permissions:
+      contents: write
+      id-token: write
+      pull-requests: read
+
+    steps:
+      - name: Create GitHub App token
+        uses: actions/create-github-app-token@v1
+        id: app-token
+        with:
+          app-id: 3410763
+          private-key: ${{ secrets.ACTIONS_BOT_PRIVATE_KEY }}
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Setup GCP
+        uses: zeddiushq/github-actions/setup-gcp@main
+        with:
+          workload_identity_provider: ${{ vars.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.SERVICE_ACCOUNT }}
+          registry: us-central1-docker.pkg.dev
+
+      - name: Read version
+        id: version
+        run: echo "version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')" >> $GITHUB_OUTPUT
+
+      - name: Build and push Docker image
+        run: |
+          docker build \
+            -t us-central1-docker.pkg.dev/${{ vars.GCP_PROJECT }}/docker/zeddius-api:${{ steps.version.outputs.version }} .
+          docker push us-central1-docker.pkg.dev/${{ vars.GCP_PROJECT }}/docker/zeddius-api:${{ steps.version.outputs.version }}
+
+      - name: Tag release
+        run: |
+          git config user.name "zeddius-actions[bot]"
+          git config user.email "zeddius-actions[bot]@users.noreply.github.com"
+          git tag v${{ steps.version.outputs.version }}
+          git push origin v${{ steps.version.outputs.version }}
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          gh release create v${{ steps.version.outputs.version }} \
+            --title "v${{ steps.version.outputs.version }}" \
+            --generate-notes
+
+      - name: Bump version
+        run: |
+          cargo install cargo-edit
+          cargo set-version --bump patch
+          git add Cargo.toml Cargo.lock
+          git commit -m "chore: bump version to $(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')"
+          git push

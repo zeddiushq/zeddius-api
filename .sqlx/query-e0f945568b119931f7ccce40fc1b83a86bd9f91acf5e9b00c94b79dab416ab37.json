@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH revoked AS (\n             UPDATE refresh_tokens SET revoked_at = now()\n             WHERE token_hash = $1\n             RETURNING access_token_id\n         )\n         UPDATE access_tokens SET revoked_at = now()\n         WHERE id = (SELECT access_token_id FROM revoked)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e0f945568b119931f7ccce40fc1b83a86bd9f91acf5e9b00c94b79dab416ab37"
+}
