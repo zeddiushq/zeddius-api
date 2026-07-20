@@ -1,5 +1,9 @@
 use axum::http::StatusCode;
-use axum::{Json, Router, extract::State, routing};
+use axum::{
+    Json, Router,
+    extract::{Path, State},
+    routing,
+};
 use chrono::{Duration, Utc};
 use uuid::Uuid;
 
@@ -7,6 +11,7 @@ use super::extractor::AuthUser;
 use super::service;
 use crate::domain::user::model::{
     AuthResponse, LoginRequest, RefreshRequest, RegisterRequest, UserResponse,
+    UsernameAvailableResponse,
 };
 use crate::domain::user::repo;
 use crate::error::AppError;
@@ -129,6 +134,10 @@ pub fn router() -> Router<AppState> {
         .route("/auth/login", routing::post(login))
         .route("/auth/refresh", routing::post(refresh))
         .route("/auth/logout", routing::post(logout))
+        .route(
+            "/auth/username/{username}/available",
+            routing::get(username_available),
+        )
 }
 
 async fn register(
@@ -194,6 +203,20 @@ async fn register(
             user: UserResponse::from(user),
         }),
     ))
+}
+
+async fn username_available(
+    State(state): State<AppState>,
+    Path(username): Path<String>,
+) -> Result<Json<UsernameAvailableResponse>, AppError> {
+    let username_lower = username.to_lowercase();
+    let available = if RESERVED_USERNAMES.contains(&username_lower.as_str()) {
+        false
+    } else {
+        !repo::username_exists(&state.db, &username).await?
+    };
+
+    Ok(Json(UsernameAvailableResponse { available }))
 }
 
 async fn login(

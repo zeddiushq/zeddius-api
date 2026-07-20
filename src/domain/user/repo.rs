@@ -32,6 +32,15 @@ pub async fn find_by_email(db: &PgPool, email: &str) -> Result<Option<User>, sql
         .await
 }
 
+pub async fn username_exists(db: &PgPool, username: &str) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar!(
+        r#"SELECT EXISTS(SELECT 1 FROM users WHERE username = $1) as "exists!""#,
+        username
+    )
+    .fetch_one(db)
+    .await
+}
+
 pub async fn find_by_refresh_token(
     db: &PgPool,
     token_hash: &str,
