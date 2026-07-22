@@ -189,11 +189,18 @@ Raw tokens are never stored. Only hashes. The raw token leaves the server exactl
 On `POST /auth/oauth/apple`:
 1. Fetch Apple's JWKS from `https://appleid.apple.com/auth/keys` (cache with short TTL)
 2. Decode and verify the identity token JWT signature using the matching public key
-3. Validate claims: `iss = https://appleid.apple.com`, `aud = <your bundle ID>`, `exp > now()`
-4. Extract `sub` (Apple user ID) and `email`
+3. Validate claims: `iss = https://appleid.apple.com`, `aud ∈ { bundle ID, services ID }` (native iOS tokens carry the App ID's bundle ID; web tokens carry the Services ID — both are accepted), `exp > now()`
+4. Extract `sub` (Apple user ID) and `email`. **An identity token with no `email` claim is rejected outright** (`AppError::Internal`, logged loudly) — both Apple and Google reliably include one when email scope is requested, so a missing claim means the provider isn't honoring an assumption this whole design depends on. There is deliberately no fallback to a client-typed email: self-typing a substitute is exactly the unverifiable input that made account linking unsafe to begin with. If this ever fires in practice, that's a signal to go verify the provider's actual behavior, not a case to quietly route around.
 5. Look up `oauth_accounts` by `(provider = 'apple', provider_user_id = sub)`
-6. If found → issue token pair for the linked user
-7. If not found → return `needs_onboarding: true` with no tokens
+6. If found → `200 OK` with the token pair for the linked user
+7. If not found, and the email matches an existing `users.email` → resolve by how that account was established, never by inferring trust from the email match alone:
+   - **The account has a password** → only a self-typed credential backs it; a matching email claim alone doesn't prove the caller controls it. Return `409 Conflict` — the client proves that password via `POST /auth/oauth/apple/link`.
+   - **The account has no password** → it should only be reachable because some OAuth provider's own claim created it in the first place. Confirm that directly (`repo::has_verified_oauth_email` — does an `oauth_accounts` row exist for this user recording this exact email) rather than inferring it from the absence of a password; that absence is only safe today because of how account creation happens to work, not because it's an enforced invariant. If confirmed → link and issue tokens, same as case 6. If not confirmed (the invariant is somehow violated) → log an error and fall through to `204` rather than silently linking.
+8. If nothing matches → `204 No Content`, no body — the client goes to onboarding via `POST /auth/oauth/apple/complete`. The status code alone distinguishes every outcome (`401`/`409`/`204`/`200`) — there is no `needs_onboarding` flag or body-based signaling anywhere in this flow. Once a user record exists, `user.onboarding_complete` (shared with every other auth flow) says whether profile completion still needs to run — a different question from whether the record exists at all.
+
+### Resolving a 409 (`POST /auth/oauth/apple/link`)
+
+Takes `{ identity_token, password }`. Re-verifies the identity token (same rules as above, including the required email claim), checks `oauth_accounts` first for idempotency (a retried call for an already-linked identity just logs in rather than re-checking the password), otherwise looks up the email-matched account and verifies `password` against its `password_hash` — wrong password is `401`, same as `login`. On success, links the identity and issues a token pair, `200`.
 
 The identity token is verified and discarded. It never leaves the auth handler.
 
@@ -274,7 +281,8 @@ All config from environment variables. `config.rs` loads them into a `Config` st
 
 Required env vars:
 - `DATABASE_URL` — Neon connection string (includes pooler URL for production)
-- `APPLE_BUNDLE_ID` — used to validate `aud` claim in Apple identity tokens
+- `APPLE_BUNDLE_ID` — iOS App ID's bundle identifier; accepted as a valid `aud` claim on Apple identity tokens (native Sign in with Apple)
+- `APPLE_SERVICES_ID` — web Services ID; accepted as a valid `aud` claim on Apple identity tokens (redirect-based OAuth flow via `zeddius-web`)
 - `GCS_BUCKET_PHOTOS` — Cloud Storage bucket for body photo uploads
 - `RUST_LOG` — tracing filter (e.g., `zeddius_api=debug,sqlx=warn`)
 

@@ -32,6 +32,64 @@ pub async fn find_by_email(db: &PgPool, email: &str) -> Result<Option<User>, sql
         .await
 }
 
+pub async fn find_by_oauth(
+    db: &PgPool,
+    provider: &str,
+    provider_user_id: &str,
+) -> Result<Option<User>, sqlx::Error> {
+    sqlx::query_as!(
+        User,
+        "SELECT u.*
+         FROM users u
+         JOIN oauth_accounts oa ON oa.user_id = u.id
+         WHERE oa.provider = $1 AND oa.provider_user_id = $2",
+        provider,
+        provider_user_id
+    )
+    .fetch_optional(db)
+    .await
+}
+
+// Links an already-existing user to a new OAuth identity. Only ever called
+// with an email that came from the provider's own verified claim, never one
+// supplied by the client.
+pub async fn link_oauth_account(
+    db: &PgPool,
+    user_id: Uuid,
+    provider: &str,
+    provider_user_id: &str,
+    email: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query!(
+        "INSERT INTO oauth_accounts (user_id, provider, provider_user_id, email)
+         VALUES ($1, $2, $3, $4)",
+        user_id,
+        provider,
+        provider_user_id,
+        email,
+    )
+    .execute(db)
+    .await?;
+    Ok(())
+}
+
+// True if some prior OAuth link recorded this exact email for this user.
+pub async fn has_verified_oauth_email(
+    db: &PgPool,
+    user_id: Uuid,
+    email: &str,
+) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar!(
+        r#"SELECT EXISTS(
+               SELECT 1 FROM oauth_accounts WHERE user_id = $1 AND email = $2
+           ) as "exists!""#,
+        user_id,
+        email,
+    )
+    .fetch_one(db)
+    .await
+}
+
 pub async fn username_exists(db: &PgPool, username: &str) -> Result<bool, sqlx::Error> {
     sqlx::query_scalar!(
         r#"SELECT EXISTS(SELECT 1 FROM users WHERE username = $1) as "exists!""#,
@@ -78,6 +136,46 @@ pub async fn create(
     )
     .fetch_one(db)
     .await
+}
+
+// Creates a new user and links it to an OAuth identity atomically — the two
+// inserts must succeed together, or the user would exist with no way to ever
+// be found by that identity again on a future sign-in.
+pub async fn create_with_oauth(
+    db: &PgPool,
+    email: &str,
+    username: &str,
+    display_name: &str,
+    provider: &str,
+    provider_user_id: &str,
+) -> Result<User, sqlx::Error> {
+    let mut tx = db.begin().await?;
+
+    let user = sqlx::query_as!(
+        User,
+        "INSERT INTO users (email, username, display_name)
+         VALUES ($1, $2, $3)
+         RETURNING *",
+        email,
+        username,
+        display_name,
+    )
+    .fetch_one(&mut *tx)
+    .await?;
+
+    sqlx::query!(
+        "INSERT INTO oauth_accounts (user_id, provider, provider_user_id, email)
+         VALUES ($1, $2, $3, $4)",
+        user.id,
+        provider,
+        provider_user_id,
+        email,
+    )
+    .execute(&mut *tx)
+    .await?;
+
+    tx.commit().await?;
+    Ok(user)
 }
 
 pub async fn insert_token_pair(

@@ -33,3 +33,51 @@ pub fn verify_password(password: &str, hash: &str) -> anyhow::Result<bool> {
         .verify_password(password.as_bytes(), &parsed)
         .is_ok())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn generate_token_has_expected_prefix_and_length() {
+        let token = generate_token("zeddius_ac");
+        let hex_part = token
+            .strip_prefix("zeddius_ac_")
+            .expect("token should carry the given prefix");
+        assert_eq!(hex_part.len(), 64, "32 raw bytes hex-encode to 64 chars");
+        assert!(hex_part.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn generate_token_is_random() {
+        assert_ne!(generate_token("prefix"), generate_token("prefix"));
+    }
+
+    #[test]
+    fn hash_token_is_deterministic() {
+        let raw = "some-raw-token-value";
+        assert_eq!(hash_token(raw), hash_token(raw));
+    }
+
+    #[test]
+    fn hash_token_differs_for_different_input() {
+        assert_ne!(hash_token("a"), hash_token("b"));
+    }
+
+    #[test]
+    fn hash_and_verify_password_round_trip() {
+        let hash = hash_password("correct horse battery staple").unwrap();
+        assert!(verify_password("correct horse battery staple", &hash).unwrap());
+    }
+
+    #[test]
+    fn verify_password_rejects_wrong_password() {
+        let hash = hash_password("correct horse battery staple").unwrap();
+        assert!(!verify_password("wrong password", &hash).unwrap());
+    }
+
+    #[test]
+    fn verify_password_rejects_malformed_hash() {
+        assert!(verify_password("anything", "not-a-real-hash").is_err());
+    }
+}
