@@ -87,3 +87,21 @@ pub struct AuthResponse {
 pub struct UsernameAvailableResponse {
     pub available: bool,
 }
+
+#[derive(Debug, Deserialize)]
+pub struct AppleAuthRequest {
+    pub identity_token: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AppleCompleteRequest {
+    pub identity_token: String,
+    pub username: String,
+    pub display_name: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AppleLinkRequest {
+    pub identity_token: String,
+    pub password: String,
+}

@@ -3,6 +3,8 @@ use anyhow::{Context, anyhow};
 pub struct Config {
     pub database_url: String,
     pub port: u16,
+    pub apple_bundle_id: String,
+    pub apple_services_id: String,
 }
 
 impl Config {
@@ -12,6 +14,8 @@ impl Config {
             port: optional("PORT", "8080")
                 .parse()
                 .context("PORT must be a valid port number (0–65535)")?,
+            apple_bundle_id: required("APPLE_BUNDLE_ID")?,
+            apple_services_id: required("APPLE_SERVICES_ID")?,
         })
     }
 }
