@@ -5,7 +5,12 @@ use axum::{
     extract::{Path, State},
     routing,
 };
-use chrono::{Duration, Utc};
+use chrono::{Duration as ChronoDuration, Utc};
+use std::time::Duration as StdDuration;
+use tokio::time;
+use tower_governor::GovernorLayer;
+use tower_governor::governor::GovernorConfigBuilder;
+use tower_governor::key_extractor::SmartIpKeyExtractor;
 use uuid::Uuid;
 
 use super::apple;
@@ -131,6 +136,34 @@ const RESERVED_USERNAMES: &[&str] = &[
 ];
 
 pub fn router() -> Router<AppState> {
+    // Applies to every /auth/* route uniformly rather than tuning per-endpoint
+    // limits — login and /oauth/apple/link are the real brute-force targets
+    // (they check a submitted password against a known account), but a single
+    // conservative limit across the whole router is simpler and still covers
+    // them. Keyed by the real client IP (SmartIpKeyExtractor reads standard
+    // forwarded headers) since Cloud Run sits behind a load balancer — keying
+    // on the raw peer address would key every request on the LB's own IP.
+    // In-memory only: state isn't shared across Cloud Run replicas, so the
+    // effective limit scales with instance count. Fine at personal scale;
+    // would need a shared store (Redis/Memorystore) if that ever matters.
+    let governor_conf = GovernorConfigBuilder::default()
+        .per_second(10)
+        .burst_size(8)
+        .key_extractor(SmartIpKeyExtractor)
+        .finish()
+        .expect("rate limit config is valid");
+
+    // Prevents the in-memory rate-limit map from growing unbounded over the
+    // process's lifetime by periodically dropping entries with no recent activity.
+    let limiter = governor_conf.limiter().clone();
+    tokio::spawn(async move {
+        let mut interval = time::interval(StdDuration::from_secs(60));
+        loop {
+            interval.tick().await;
+            limiter.retain_recent();
+        }
+    });
+
     Router::new()
         .route("/auth/register", routing::post(register))
         .route("/auth/login", routing::post(login))
@@ -150,6 +183,7 @@ pub fn router() -> Router<AppState> {
             "/auth/username/{username}/available",
             routing::get(username_available),
         )
+        .layer(GovernorLayer::new(governor_conf))
 }
 
 async fn register(
@@ -474,7 +508,21 @@ fn is_valid_email(email: &str) -> bool {
 }
 
 fn user_agent(headers: &HeaderMap) -> Option<&str> {
+    // TEMPORARY diagnostic — remove once we've confirmed what Cloud Run
+    // actually forwards to the container for the rate limiter's key
+    // extractor to read.
+    tracing::info!(
+        x_forwarded_for = ?header_str(headers, "x-forwarded-for"),
+        x_real_ip = ?header_str(headers, "x-real-ip"),
+        forwarded = ?header_str(headers, "forwarded"),
+        "rate limit key extractor diagnostic"
+    );
+
     headers.get(axum::http::header::USER_AGENT)?.to_str().ok()
+}
+
+fn header_str<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
+    headers.get(name)?.to_str().ok()
 }
 
 // Pure assembly — no I/O, reusable regardless of how the tokens were issued
@@ -496,8 +544,8 @@ async fn issue_token_pair(
     let refresh_token = service::generate_token("zeddius_rf");
 
     let now = Utc::now();
-    let access_expires = now + Duration::seconds(ACCESS_TOKEN_SECS);
-    let refresh_expires = now + Duration::seconds(REFRESH_TOKEN_SECS);
+    let access_expires = now + ChronoDuration::seconds(ACCESS_TOKEN_SECS);
+    let refresh_expires = now + ChronoDuration::seconds(REFRESH_TOKEN_SECS);
 
     repo::insert_token_pair(
         executor,

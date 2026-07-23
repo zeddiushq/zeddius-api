@@ -31,6 +31,7 @@ The Zeddius backend. System of record for all user data, and the sole auth autho
 - `anyhow` — error context propagation in internal code
 - `thiserror` — derive macro for the `AppError` type
 - `tower` / `tower-http` — middleware (CORS, request tracing, compression)
+- `tower_governor` — in-memory rate limiting on `/auth/*` (see Auth section)
 - `tracing` / `tracing-subscriber` — structured logging
 
 ---
@@ -203,6 +204,16 @@ On `POST /auth/oauth/apple`:
 Takes `{ identity_token, password }`. Re-verifies the identity token (same rules as above, including the required email claim), checks `oauth_accounts` first for idempotency (a retried call for an already-linked identity just logs in rather than re-checking the password), otherwise looks up the email-matched account and verifies `password` against its `password_hash` — wrong password is `401`, same as `login`. On success, links the identity and issues a token pair, `200`.
 
 The identity token is verified and discarded. It never leaves the auth handler.
+
+### Rate limiting (`auth/routes.rs`)
+
+A single `tower_governor` layer wraps the entire `/auth` router — not tuned per endpoint. `login` and `/oauth/apple/link` are the real brute-force targets (they check a submitted password against a known account), but one conservative limit across the whole router is simpler and still covers them; `register` and the token-verification-heavy endpoints get the same protection against request floods as a side effect.
+
+Keyed by real client IP via `SmartIpKeyExtractor` (reads `X-Forwarded-For`/`X-Real-IP`/`Forwarded`, falls back to the TCP peer address) — required because Cloud Run sits behind a load balancer, so the raw peer address on every request would just be the LB's own IP, collapsing all traffic into one bucket. `main.rs` uses `into_make_service_with_connect_info::<SocketAddr>()` so the peer-address fallback has something to read.
+
+State is in-memory only, not shared across Cloud Run replicas — the effective limit scales with instance count (currently up to 3). Acceptable at personal scale; would need a shared store (Redis/Memorystore) if replica count or real attack traffic ever made that matter. A background task calls `retain_recent()` every 60s so the in-memory map doesn't grow unbounded over the process's lifetime.
+
+Current config: burst of 8 requests, replenishing 1 every 10 seconds (~6/minute sustained) — deliberately not database-backed (Neon or otherwise): rate limiting needs to be checked on every request as cheaply as possible, and a network round-trip to a database — especially one that autosuspends on idle, like Neon at this scale — would add real latency to every legitimate request and create contention on the same connection pool the rest of the app needs, right when it's under the abuse the feature exists to defend against.
 
 ### Error handling
 
