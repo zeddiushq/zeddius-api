@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH new_access AS (\n             INSERT INTO access_tokens (user_id, token_hash, expires_at)\n             VALUES ($1, $2, $3)\n             RETURNING id\n         )\n         INSERT INTO refresh_tokens (user_id, token_hash, expires_at, access_token_id, user_agent)\n         VALUES ($1, $4, $5, (SELECT id FROM new_access), $6)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Timestamptz",
+        "Text",
+        "Timestamptz",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "2496e9c58cd98fa97b1a3d9418a3a3c44e111e1b0ba6117a5177234d85b73d71"
+}

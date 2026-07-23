@@ -105,3 +105,12 @@ pub struct AppleLinkRequest {
     pub identity_token: String,
     pub password: String,
 }
+
+#[derive(Debug, sqlx::FromRow, Serialize)]
+pub struct Session {
+    pub id: Uuid,
+    pub created_at: DateTime<Utc>,
+    pub expires_at: DateTime<Utc>,
+    pub user_agent: Option<String>,
+    pub is_current: bool,
+}
