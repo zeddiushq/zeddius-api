@@ -508,21 +508,7 @@ fn is_valid_email(email: &str) -> bool {
 }
 
 fn user_agent(headers: &HeaderMap) -> Option<&str> {
-    // TEMPORARY diagnostic — remove once we've confirmed what Cloud Run
-    // actually forwards to the container for the rate limiter's key
-    // extractor to read.
-    tracing::info!(
-        x_forwarded_for = ?header_str(headers, "x-forwarded-for"),
-        x_real_ip = ?header_str(headers, "x-real-ip"),
-        forwarded = ?header_str(headers, "forwarded"),
-        "rate limit key extractor diagnostic"
-    );
-
     headers.get(axum::http::header::USER_AGENT)?.to_str().ok()
-}
-
-fn header_str<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
-    headers.get(name)?.to_str().ok()
 }
 
 // Pure assembly — no I/O, reusable regardless of how the tokens were issued
