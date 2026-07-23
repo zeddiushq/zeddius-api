@@ -5,6 +5,8 @@ mod domain;
 mod error;
 mod state;
 
+use std::net::SocketAddr;
+
 use anyhow::Context;
 use axum::{Json, Router, routing};
 use serde::Serialize;
@@ -46,7 +48,12 @@ async fn main() -> anyhow::Result<()> {
             .local_addr()
             .expect("bound listener has local addr")
     );
-    axum::serve(listener, app).await.context("server error")?;
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await
+    .context("server error")?;
 
     Ok(())
 }
