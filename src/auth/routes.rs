@@ -1,4 +1,4 @@
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::{
     Json, Router,
@@ -13,7 +13,7 @@ use super::extractor::AuthUser;
 use super::service;
 use crate::domain::user::model::{
     AppleAuthRequest, AppleCompleteRequest, AppleLinkRequest, AuthResponse, LoginRequest,
-    RefreshRequest, RegisterRequest, User, UserResponse, UsernameAvailableResponse,
+    RefreshRequest, RegisterRequest, Session, User, UserResponse, UsernameAvailableResponse,
 };
 use crate::domain::user::repo;
 use crate::error::AppError;
@@ -136,6 +136,10 @@ pub fn router() -> Router<AppState> {
         .route("/auth/login", routing::post(login))
         .route("/auth/refresh", routing::post(refresh))
         .route("/auth/logout", routing::post(logout))
+        .route(
+            "/auth/sessions",
+            routing::get(list_sessions).delete(revoke_sessions),
+        )
         .route("/auth/oauth/apple", routing::post(oauth_apple))
         .route(
             "/auth/oauth/apple/complete",
@@ -150,6 +154,7 @@ pub fn router() -> Router<AppState> {
 
 async fn register(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(body): Json<RegisterRequest>,
 ) -> Result<(StatusCode, Json<AuthResponse>), AppError> {
     if body.email.is_empty()
@@ -203,12 +208,13 @@ async fn register(
 
     Ok((
         StatusCode::CREATED,
-        Json(issue_token_pair_and_build_auth_response(&state, user).await?),
+        Json(issue_token_pair_and_build_auth_response(&state, user, user_agent(&headers)).await?),
     ))
 }
 
 async fn login(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(body): Json<LoginRequest>,
 ) -> Result<Json<AuthResponse>, AppError> {
     let user = repo::find_by_email(&state.db, &body.email)
@@ -225,12 +231,13 @@ async fn login(
     }
 
     Ok(Json(
-        issue_token_pair_and_build_auth_response(&state, user).await?,
+        issue_token_pair_and_build_auth_response(&state, user, user_agent(&headers)).await?,
     ))
 }
 
 async fn refresh(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(body): Json<RefreshRequest>,
 ) -> Result<Json<AuthResponse>, AppError> {
     let token_hash = service::hash_token(&body.refresh_token);
@@ -241,7 +248,8 @@ async fn refresh(
 
     let mut tx = state.db.begin().await?;
     repo::revoke_token_pair_by_refresh_hash(&mut *tx, &token_hash).await?;
-    let (access_token, refresh_token) = issue_token_pair(&mut *tx, user.id).await?;
+    let (access_token, refresh_token) =
+        issue_token_pair(&mut *tx, user.id, user_agent(&headers)).await?;
     tx.commit().await?;
 
     Ok(Json(build_auth_response(user, access_token, refresh_token)))
@@ -252,6 +260,25 @@ async fn logout(State(state): State<AppState>, auth: AuthUser) -> Result<StatusC
     Ok(StatusCode::NO_CONTENT)
 }
 
+async fn list_sessions(
+    State(state): State<AppState>,
+    auth: AuthUser,
+) -> Result<Json<Vec<Session>>, AppError> {
+    let sessions = repo::list_active_sessions(&state.db, auth.user_id, &auth.token_hash).await?;
+    Ok(Json(sessions))
+}
+
+// Revokes every other session — the caller's own session (the one making
+// this request) stays logged in. Full logout-everywhere isn't this endpoint;
+// it's just calling /auth/logout on each session individually.
+async fn revoke_sessions(
+    State(state): State<AppState>,
+    auth: AuthUser,
+) -> Result<StatusCode, AppError> {
+    repo::revoke_other_sessions(&state.db, auth.user_id, &auth.token_hash).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
 // 401 if the identity token itself doesn't check out. Otherwise 204 (no
 // linked account yet — go onboard), 409 (an account with this email exists
 // but only a password backs it — prove that via /auth/oauth/apple/link),
@@ -259,14 +286,16 @@ async fn logout(State(state): State<AppState>, auth: AuthUser) -> Result<StatusC
 // so the client never has to inspect the body to know which case it's in.
 async fn oauth_apple(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(body): Json<AppleAuthRequest>,
 ) -> Result<Response, AppError> {
     let (claims, email) = verify_apple_identity_with_email(&state, &body.identity_token).await?;
 
     if let Some(user) = repo::find_by_oauth(&state.db, "apple", &claims.sub).await? {
-        return Ok(
-            Json(issue_token_pair_and_build_auth_response(&state, user).await?).into_response(),
-        );
+        return Ok(Json(
+            issue_token_pair_and_build_auth_response(&state, user, user_agent(&headers)).await?,
+        )
+        .into_response());
     }
 
     // No oauth_accounts row for this sub yet. If the email matches an
@@ -282,9 +311,11 @@ async fn oauth_apple(
 
         if repo::has_verified_oauth_email(&state.db, user.id, &user.email).await? {
             repo::link_oauth_account(&state.db, user.id, "apple", &claims.sub, &email).await?;
-            return Ok(
-                Json(issue_token_pair_and_build_auth_response(&state, user).await?).into_response(),
-            );
+            return Ok(Json(
+                issue_token_pair_and_build_auth_response(&state, user, user_agent(&headers))
+                    .await?,
+            )
+            .into_response());
         }
 
         tracing::error!(
@@ -304,6 +335,7 @@ async fn oauth_apple(
 // directly in one step.
 async fn oauth_apple_complete(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(body): Json<AppleCompleteRequest>,
 ) -> Result<(StatusCode, Json<AuthResponse>), AppError> {
     let (claims, email) = verify_apple_identity_with_email(&state, &body.identity_token).await?;
@@ -311,7 +343,8 @@ async fn oauth_apple_complete(
     // Idempotency: a retried/duplicate completion call for an identity that's
     // already linked logs the user in instead of trying to recreate them.
     if let Some(user) = repo::find_by_oauth(&state.db, "apple", &claims.sub).await? {
-        let response = issue_token_pair_and_build_auth_response(&state, user).await?;
+        let response =
+            issue_token_pair_and_build_auth_response(&state, user, user_agent(&headers)).await?;
         return Ok((StatusCode::OK, Json(response)));
     }
 
@@ -347,7 +380,8 @@ async fn oauth_apple_complete(
         _ => AppError::from(e),
     })?;
 
-    let response = issue_token_pair_and_build_auth_response(&state, user).await?;
+    let response =
+        issue_token_pair_and_build_auth_response(&state, user, user_agent(&headers)).await?;
 
     Ok((StatusCode::CREATED, Json(response)))
 }
@@ -356,6 +390,7 @@ async fn oauth_apple_complete(
 // existing password-holding account before linking this Apple identity to it.
 async fn oauth_apple_link(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(body): Json<AppleLinkRequest>,
 ) -> Result<Json<AuthResponse>, AppError> {
     let (claims, email) = verify_apple_identity_with_email(&state, &body.identity_token).await?;
@@ -364,7 +399,7 @@ async fn oauth_apple_link(
     // just logs the user in instead of re-checking the password.
     if let Some(user) = repo::find_by_oauth(&state.db, "apple", &claims.sub).await? {
         return Ok(Json(
-            issue_token_pair_and_build_auth_response(&state, user).await?,
+            issue_token_pair_and_build_auth_response(&state, user, user_agent(&headers)).await?,
         ));
     }
 
@@ -384,7 +419,7 @@ async fn oauth_apple_link(
     repo::link_oauth_account(&state.db, user.id, "apple", &claims.sub, &email).await?;
 
     Ok(Json(
-        issue_token_pair_and_build_auth_response(&state, user).await?,
+        issue_token_pair_and_build_auth_response(&state, user, user_agent(&headers)).await?,
     ))
 }
 
@@ -438,6 +473,10 @@ fn is_valid_email(email: &str) -> bool {
     !local.is_empty() && domain.contains('.')
 }
 
+fn user_agent(headers: &HeaderMap) -> Option<&str> {
+    headers.get(axum::http::header::USER_AGENT)?.to_str().ok()
+}
+
 // Pure assembly — no I/O, reusable regardless of how the tokens were issued
 // (plain pool or inside a transaction).
 fn build_auth_response(user: User, access_token: String, refresh_token: String) -> AuthResponse {
@@ -451,6 +490,7 @@ fn build_auth_response(user: User, access_token: String, refresh_token: String) 
 async fn issue_token_pair(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     user_id: Uuid,
+    user_agent: Option<&str>,
 ) -> Result<(String, String), AppError> {
     let access_token = service::generate_token("zeddius_ac");
     let refresh_token = service::generate_token("zeddius_rf");
@@ -466,6 +506,7 @@ async fn issue_token_pair(
         access_expires,
         &service::hash_token(&refresh_token),
         refresh_expires,
+        user_agent,
     )
     .await?;
 
@@ -477,8 +518,9 @@ async fn issue_token_pair(
 async fn issue_token_pair_and_build_auth_response(
     state: &AppState,
     user: User,
+    user_agent: Option<&str>,
 ) -> Result<AuthResponse, AppError> {
-    let (access_token, refresh_token) = issue_token_pair(&state.db, user.id).await?;
+    let (access_token, refresh_token) = issue_token_pair(&state.db, user.id, user_agent).await?;
     Ok(build_auth_response(user, access_token, refresh_token))
 }
 

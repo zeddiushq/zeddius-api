@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use super::model::User;
+use super::model::{Session, User};
 
 pub async fn find_id_by_access_token(
     db: &PgPool,
@@ -185,6 +185,7 @@ pub async fn insert_token_pair(
     access_expires_at: DateTime<Utc>,
     refresh_token_hash: &str,
     refresh_expires_at: DateTime<Utc>,
+    user_agent: Option<&str>,
 ) -> Result<(), sqlx::Error> {
     sqlx::query!(
         "WITH new_access AS (
@@ -192,13 +193,14 @@ pub async fn insert_token_pair(
              VALUES ($1, $2, $3)
              RETURNING id
          )
-         INSERT INTO refresh_tokens (user_id, token_hash, expires_at, access_token_id)
-         VALUES ($1, $4, $5, (SELECT id FROM new_access))",
+         INSERT INTO refresh_tokens (user_id, token_hash, expires_at, access_token_id, user_agent)
+         VALUES ($1, $4, $5, (SELECT id FROM new_access), $6)",
         user_id,
         access_token_hash,
         access_expires_at,
         refresh_token_hash,
         refresh_expires_at,
+        user_agent,
     )
     .execute(executor)
     .await?;
@@ -241,6 +243,50 @@ pub async fn revoke_token_pair_by_refresh_hash(
         refresh_token_hash,
     )
     .execute(executor)
+    .await?;
+    Ok(())
+}
+
+pub async fn list_active_sessions(
+    db: &PgPool,
+    user_id: Uuid,
+    current_access_token_hash: &str,
+) -> Result<Vec<Session>, sqlx::Error> {
+    sqlx::query_as!(
+        Session,
+        r#"SELECT rt.id, rt.created_at, rt.expires_at, rt.user_agent,
+               (at.token_hash = $2) as "is_current!"
+           FROM refresh_tokens rt
+           JOIN access_tokens at ON at.id = rt.access_token_id
+           WHERE rt.user_id = $1 AND rt.revoked_at IS NULL AND rt.expires_at > now()
+           ORDER BY rt.created_at DESC"#,
+        user_id,
+        current_access_token_hash,
+    )
+    .fetch_all(db)
+    .await
+}
+
+// Revokes every session for `user_id` except the one whose access token
+// matches `current_access_token_hash` — "log out all other devices," not a
+// full logout of the caller too.
+pub async fn revoke_other_sessions(
+    db: &PgPool,
+    user_id: Uuid,
+    current_access_token_hash: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query!(
+        "WITH revoked_access AS (
+             UPDATE access_tokens SET revoked_at = now()
+             WHERE user_id = $1 AND token_hash != $2 AND revoked_at IS NULL
+             RETURNING id
+         )
+         UPDATE refresh_tokens SET revoked_at = now()
+         WHERE access_token_id IN (SELECT id FROM revoked_access)",
+        user_id,
+        current_access_token_hash,
+    )
+    .execute(db)
     .await?;
     Ok(())
 }

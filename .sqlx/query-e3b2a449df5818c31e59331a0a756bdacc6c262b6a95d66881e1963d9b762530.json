@@ -1,0 +1,47 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT rt.id, rt.created_at, rt.expires_at, rt.user_agent,\n               (at.token_hash = $2) as \"is_current!\"\n           FROM refresh_tokens rt\n           JOIN access_tokens at ON at.id = rt.access_token_id\n           WHERE rt.user_id = $1 AND rt.revoked_at IS NULL AND rt.expires_at > now()\n           ORDER BY rt.created_at DESC",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 2,
+        "name": "expires_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 3,
+        "name": "user_agent",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "is_current!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      null
+    ]
+  },
+  "hash": "e3b2a449df5818c31e59331a0a756bdacc6c262b6a95d66881e1963d9b762530"
+}
