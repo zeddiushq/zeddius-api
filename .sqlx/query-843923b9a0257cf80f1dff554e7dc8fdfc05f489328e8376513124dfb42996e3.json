@@ -72,6 +72,26 @@
         "ordinal": 13,
         "name": "updated_at",
         "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 14,
+        "name": "email_verified_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 15,
+        "name": "email_verification_code_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 16,
+        "name": "email_verification_code_expires_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 17,
+        "name": "email_verification_attempts",
+        "type_info": "Int4"
       }
     ],
     "parameters": {
@@ -93,6 +113,10 @@
       true,
       false,
       false,
+      false,
+      true,
+      true,
+      true,
       false
     ]
   },

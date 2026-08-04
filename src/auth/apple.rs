@@ -3,6 +3,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, anyhow};
 use jsonwebtoken::{Algorithm, DecodingKey, Validation};
+use reqwest::Client;
 use serde::Deserialize;
 use tokio::sync::{Mutex, RwLock};
 
@@ -34,6 +35,28 @@ struct Jwk {
 pub struct AppleClaims {
     pub sub: String,
     pub email: Option<String>,
+    // Apple has been observed sending this as either a JSON bool or a
+    // stringified "true"/"false" depending on client version. Missing
+    // entirely (no email in the request) defaults to false, not an error.
+    #[serde(default, deserialize_with = "bool_or_string")]
+    pub email_verified: bool,
+}
+
+fn bool_or_string<'de, D>(deserializer: D) -> Result<bool, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum BoolOrString {
+        Bool(bool),
+        Str(String),
+    }
+
+    Ok(match BoolOrString::deserialize(deserializer)? {
+        BoolOrString::Bool(b) => b,
+        BoolOrString::Str(s) => s == "true",
+    })
 }
 
 // Verifies an Apple identity token's signature against Apple's JWKS and checks
@@ -44,6 +67,7 @@ pub struct AppleClaims {
 // tokens with different `aud` values for the same physical endpoint.
 // Returns the extracted sub + email on success.
 pub async fn verify_identity_token(
+    client: &Client,
     identity_token: &str,
     valid_audiences: &[&str],
 ) -> anyhow::Result<AppleClaims> {
@@ -53,7 +77,7 @@ pub async fn verify_identity_token(
         .kid
         .ok_or_else(|| anyhow!("identity token missing kid"))?;
 
-    let jwk = find_key(&kid).await?;
+    let jwk = find_key(client, &kid).await?;
     let decoding_key = DecodingKey::from_rsa_components(&jwk.n, &jwk.e)
         .context("failed to build decoding key from Apple JWK")?;
 
@@ -67,7 +91,7 @@ pub async fn verify_identity_token(
     Ok(data.claims)
 }
 
-async fn find_key(kid: &str) -> anyhow::Result<Jwk> {
+async fn find_key(client: &Client, kid: &str) -> anyhow::Result<Jwk> {
     if let Some(jwk) = cached_key(kid).await {
         return Ok(jwk);
     }
@@ -78,7 +102,7 @@ async fn find_key(kid: &str) -> anyhow::Result<Jwk> {
         return Ok(jwk);
     }
 
-    let jwks = fetch_jwks().await?;
+    let jwks = fetch_jwks(client).await?;
     let jwk = jwks
         .keys
         .iter()
@@ -101,8 +125,10 @@ async fn cached_key(kid: &str) -> Option<Jwk> {
     jwks.keys.iter().find(|k| k.kid == kid).cloned()
 }
 
-async fn fetch_jwks() -> anyhow::Result<Jwks> {
-    reqwest::get(JWKS_URL)
+async fn fetch_jwks(client: &Client) -> anyhow::Result<Jwks> {
+    client
+        .get(JWKS_URL)
+        .send()
         .await
         .context("failed to fetch Apple JWKS")?
         .json()
@@ -147,5 +173,22 @@ mod tests {
         assert_eq!(jwks.keys[0].n, "abcd1234");
         assert_eq!(jwks.keys[0].e, "AQAB");
         assert_eq!(jwks.keys[1].kid, "86D88Kf");
+    }
+
+    #[test]
+    fn email_verified_accepts_bool_or_string() {
+        let bool_form: AppleClaims =
+            serde_json::from_str(r#"{"sub":"1","email":"a@b.com","email_verified":true}"#)
+                .expect("bool form should parse");
+        assert!(bool_form.email_verified);
+
+        let string_form: AppleClaims =
+            serde_json::from_str(r#"{"sub":"1","email":"a@b.com","email_verified":"false"}"#)
+                .expect("string form should parse");
+        assert!(!string_form.email_verified);
+
+        let missing: AppleClaims = serde_json::from_str(r#"{"sub":"1","email":"a@b.com"}"#)
+            .expect("missing field should default rather than error");
+        assert!(!missing.email_verified);
     }
 }

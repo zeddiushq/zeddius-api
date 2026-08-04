@@ -4,20 +4,25 @@ use uuid::Uuid;
 
 use super::model::{Session, User};
 
-pub async fn find_id_by_access_token(
+// Joins to `users` so the extractor can check email_verified_at on every
+// authenticated request without a second round trip.
+pub async fn find_auth_context_by_access_token(
     db: &PgPool,
     token_hash: &str,
-) -> Result<Option<Uuid>, sqlx::Error> {
-    sqlx::query_scalar!(
-        r#"SELECT user_id as "user_id: Uuid"
-           FROM access_tokens
-           WHERE token_hash = $1
-             AND revoked_at IS NULL
-             AND expires_at > now()"#,
+) -> Result<Option<(Uuid, Option<DateTime<Utc>>)>, sqlx::Error> {
+    let row = sqlx::query!(
+        r#"SELECT at.user_id as "user_id: Uuid", u.email_verified_at
+           FROM access_tokens at
+           JOIN users u ON u.id = at.user_id
+           WHERE at.token_hash = $1
+             AND at.revoked_at IS NULL
+             AND at.expires_at > now()"#,
         token_hash
     )
     .fetch_optional(db)
-    .await
+    .await?;
+
+    Ok(row.map(|r| (r.user_id, r.email_verified_at)))
 }
 
 pub async fn find_by_id(db: &PgPool, id: Uuid) -> Result<Option<User>, sqlx::Error> {
@@ -26,10 +31,30 @@ pub async fn find_by_id(db: &PgPool, id: Uuid) -> Result<Option<User>, sqlx::Err
         .await
 }
 
-pub async fn find_by_email(db: &PgPool, email: &str) -> Result<Option<User>, sqlx::Error> {
+// Multiple unverified rows can share an email (only verified rows are
+// unique), so this can return more than one candidate. Used by login, which
+// must still work pre-verification and so can't narrow to the verified row
+// alone — callers check the password against each candidate instead of
+// trusting a single arbitrarily-chosen match.
+pub async fn find_all_by_email(db: &PgPool, email: &str) -> Result<Vec<User>, sqlx::Error> {
     sqlx::query_as!(User, "SELECT * FROM users WHERE email = $1", email)
-        .fetch_optional(db)
+        .fetch_all(db)
         .await
+}
+
+// The single verified owner of an email, if one exists — safe to treat as
+// unambiguous since verified rows are unique per email by construction
+// (users_email_verified_unique). Use this, never find_all_by_email, wherever
+// a lookup should only ever see a real, confirmed owner and must ignore any
+// unrelated unverified rows squatting on the same email.
+pub async fn find_verified_by_email(db: &PgPool, email: &str) -> Result<Option<User>, sqlx::Error> {
+    sqlx::query_as!(
+        User,
+        "SELECT * FROM users WHERE email = $1 AND email_verified_at IS NOT NULL",
+        email
+    )
+    .fetch_optional(db)
+    .await
 }
 
 pub async fn find_by_oauth(
@@ -74,11 +99,14 @@ pub async fn link_oauth_account(
 }
 
 // True if some prior OAuth link recorded this exact email for this user.
-pub async fn has_verified_oauth_email(
-    db: &PgPool,
-    user_id: Uuid,
-    email: &str,
-) -> Result<bool, sqlx::Error> {
+// Says nothing about whether that user's email is currently verified — this
+// only checks oauth_accounts existence. Callers relying on this to gate
+// auto-linking must independently ensure `user_id` refers to a verified row
+// (e.g. via find_verified_by_email) before calling; an unverified account's
+// oauth_accounts row must never count as grounds to auto-link a different,
+// newly-arriving identity onto it, but that precondition is the caller's
+// responsibility, not something this function checks.
+pub async fn has_oauth_email(db: &PgPool, user_id: Uuid, email: &str) -> Result<bool, sqlx::Error> {
     sqlx::query_scalar!(
         r#"SELECT EXISTS(
                SELECT 1 FROM oauth_accounts WHERE user_id = $1 AND email = $2
@@ -140,7 +168,10 @@ pub async fn create(
 
 // Creates a new user and links it to an OAuth identity atomically — the two
 // inserts must succeed together, or the user would exist with no way to ever
-// be found by that identity again on a future sign-in.
+// be found by that identity again on a future sign-in. `email_verified_at`
+// is set immediately only when the provider's own claim already asserted the
+// email was verified; otherwise the row is created unverified, same as a
+// password registration, and needs our own code verification.
 pub async fn create_with_oauth(
     db: &PgPool,
     email: &str,
@@ -148,17 +179,19 @@ pub async fn create_with_oauth(
     display_name: &str,
     provider: &str,
     provider_user_id: &str,
+    email_verified_at: Option<DateTime<Utc>>,
 ) -> Result<User, sqlx::Error> {
     let mut tx = db.begin().await?;
 
     let user = sqlx::query_as!(
         User,
-        "INSERT INTO users (email, username, display_name)
-         VALUES ($1, $2, $3)
+        "INSERT INTO users (email, username, display_name, email_verified_at)
+         VALUES ($1, $2, $3, $4)
          RETURNING *",
         email,
         username,
         display_name,
+        email_verified_at,
     )
     .fetch_one(&mut *tx)
     .await?;
@@ -288,5 +321,122 @@ pub async fn revoke_other_sessions(
     )
     .execute(db)
     .await?;
+    Ok(())
+}
+
+// A fresh code always resets the attempt counter — a new code deserves a new
+// guessing budget, and this is the only place that hands one out.
+pub async fn set_verification_code(
+    db: &PgPool,
+    user_id: Uuid,
+    code_hash: &str,
+    expires_at: DateTime<Utc>,
+) -> Result<(), sqlx::Error> {
+    sqlx::query!(
+        "UPDATE users
+         SET email_verification_code_hash = $2,
+             email_verification_code_expires_at = $3,
+             email_verification_attempts = 0
+         WHERE id = $1",
+        user_id,
+        code_hash,
+        expires_at,
+    )
+    .execute(db)
+    .await?;
+    Ok(())
+}
+
+// Bounds brute-force guessing of a single code — checked by the caller
+// against a max before trusting a submitted code, independent of the
+// IP-keyed rate limiter, which alone isn't enough here (a token is issued
+// unconditionally at registration, so the holder can already call this
+// endpoint freely regardless of which IP they're on).
+pub async fn increment_verification_attempts(
+    db: &PgPool,
+    user_id: Uuid,
+) -> Result<(), sqlx::Error> {
+    sqlx::query!(
+        "UPDATE users SET email_verification_attempts = email_verification_attempts + 1
+         WHERE id = $1",
+        user_id,
+    )
+    .execute(db)
+    .await?;
+    Ok(())
+}
+
+// Promotes an unverified row to verified in place — used when no other row
+// already holds this email as verified.
+pub async fn mark_email_verified(db: &PgPool, user_id: Uuid) -> Result<User, sqlx::Error> {
+    sqlx::query_as!(
+        User,
+        "UPDATE users
+         SET email_verified_at = now(),
+             email_verification_code_hash = NULL,
+             email_verification_code_expires_at = NULL,
+             email_verification_attempts = 0
+         WHERE id = $1
+         RETURNING *",
+        user_id,
+    )
+    .fetch_one(db)
+    .await
+}
+
+// A different row already holding this email as verified — the target of a
+// merge, if one exists, when `user_id` proves ownership of `email`.
+pub async fn find_verified_by_email_excluding(
+    db: &PgPool,
+    email: &str,
+    exclude_user_id: Uuid,
+) -> Result<Option<User>, sqlx::Error> {
+    sqlx::query_as!(
+        User,
+        "SELECT * FROM users WHERE email = $1 AND email_verified_at IS NOT NULL AND id != $2",
+        email,
+        exclude_user_id,
+    )
+    .fetch_optional(db)
+    .await
+}
+
+// Called when a hollow (unverified) row proves ownership of an email that a
+// different, already-verified row already holds. A hollow row can never have
+// accumulated real data — nothing can be done with it pre-verification — so
+// there's nothing to reconcile beyond credentials: move its oauth_accounts
+// links onto the verified row, backfill a password onto the verified row
+// only if it doesn't already have one, then discard the hollow row (its
+// tokens cascade-delete with it).
+pub async fn merge_hollow_into_verified(
+    db: &PgPool,
+    hollow_user_id: Uuid,
+    target_user_id: Uuid,
+) -> Result<(), sqlx::Error> {
+    let mut tx = db.begin().await?;
+
+    sqlx::query!(
+        "UPDATE oauth_accounts SET user_id = $1 WHERE user_id = $2",
+        target_user_id,
+        hollow_user_id,
+    )
+    .execute(&mut *tx)
+    .await?;
+
+    sqlx::query!(
+        "UPDATE users
+         SET password_hash = (SELECT password_hash FROM users WHERE id = $2)
+         WHERE id = $1 AND password_hash IS NULL",
+        target_user_id,
+        hollow_user_id,
+    )
+    .execute(&mut *tx)
+    .await?;
+
+    sqlx::query!("DELETE FROM users WHERE id = $1", hollow_user_id)
+        .execute(&mut *tx)
+        .await?;
+
+    tx.commit().await?;
     Ok(())
 }
