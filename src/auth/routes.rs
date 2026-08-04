@@ -14,11 +14,13 @@ use tower_governor::key_extractor::SmartIpKeyExtractor;
 use uuid::Uuid;
 
 use super::apple;
+use super::email;
 use super::extractor::AuthUser;
 use super::service;
 use crate::domain::user::model::{
     AppleAuthRequest, AppleCompleteRequest, AppleLinkRequest, AuthResponse, LoginRequest,
     RefreshRequest, RegisterRequest, Session, User, UserResponse, UsernameAvailableResponse,
+    VerifyEmailRequest,
 };
 use crate::domain::user::repo;
 use crate::error::AppError;
@@ -26,6 +28,15 @@ use crate::state::AppState;
 
 const ACCESS_TOKEN_SECS: i64 = 3600; // 1 hour
 const REFRESH_TOKEN_SECS: i64 = 365 * 24 * 3600; // 1 year
+const VERIFICATION_CODE_TTL_MINS: i64 = 15;
+// A code is burned after this many wrong guesses, regardless of whether it's
+// still within its TTL — the real defense against brute-forcing a 6-digit
+// code, since the IP-keyed rate limiter alone isn't tied to any one code.
+const MAX_VERIFICATION_ATTEMPTS: i32 = 5;
+// Bounds Argon2's cost, which scales with input size — without this, a
+// submitted password of unbounded length is a cheap way to burn CPU on
+// every hash/verify call.
+const MAX_PASSWORD_LEN: usize = 128;
 
 // Usernames that are blocked from registration. Err on the side of inclusion —
 // it is easier to release a reserved username than to reclaim one from a user.
@@ -173,6 +184,11 @@ pub fn router() -> Router<AppState> {
             "/auth/sessions",
             routing::get(list_sessions).delete(revoke_sessions),
         )
+        .route("/auth/verify-email", routing::post(verify_email))
+        .route(
+            "/auth/resend-verification",
+            routing::post(resend_verification),
+        )
         .route("/auth/oauth/apple", routing::post(oauth_apple))
         .route(
             "/auth/oauth/apple/complete",
@@ -213,11 +229,32 @@ async fn register(
         ));
     }
 
+    if body.password.len() > MAX_PASSWORD_LEN {
+        return Err(AppError::ValidationFailed(format!(
+            "password must be at most {MAX_PASSWORD_LEN} characters"
+        )));
+    }
+
     let username_lower = body.username.to_lowercase();
     if RESERVED_USERNAMES.contains(&username_lower.as_str()) {
         return Err(AppError::ValidationFailed(
             "username is reserved".to_string(),
         ));
+    }
+
+    // Unverified duplicates under the same email are allowed to coexist (the
+    // partial unique index only applies to verified rows) — but once a real
+    // owner has actually verified this email, further unverified attempts
+    // against it are refused outright rather than silently sending them
+    // another code. Whoever holds the verified row necessarily proved
+    // ownership to get there, so this can never be the same lockout bug
+    // email verification was built to fix; it only caps how many times an
+    // unrelated caller can make this address's real owner receive an email.
+    if repo::find_verified_by_email(&state.db, &body.email)
+        .await?
+        .is_some()
+    {
+        return Err(AppError::Conflict("email already registered"));
     }
 
     let password_hash = service::hash_password(&body.password)?;
@@ -231,14 +268,13 @@ async fn register(
     )
     .await
     .map_err(|e| match &e {
-        sqlx::Error::Database(db_err) if db_err.constraint() == Some("users_email_key") => {
-            AppError::Conflict("email already registered")
-        }
         sqlx::Error::Database(db_err) if db_err.constraint() == Some("users_username_key") => {
             AppError::Conflict("username already taken")
         }
         _ => AppError::from(e),
     })?;
+
+    issue_verification_code(&state, user.id, &user.email).await?;
 
     Ok((
         StatusCode::CREATED,
@@ -251,18 +287,30 @@ async fn login(
     headers: HeaderMap,
     Json(body): Json<LoginRequest>,
 ) -> Result<Json<AuthResponse>, AppError> {
-    let user = repo::find_by_email(&state.db, &body.email)
-        .await?
-        .ok_or(AppError::Unauthorized)?;
-
-    let hash = user
-        .password_hash
-        .as_deref()
-        .ok_or(AppError::Unauthorized)?;
-
-    if !service::verify_password(&body.password, hash)? {
+    // Rejected the same way as a wrong password (not a distinct validation
+    // error) — this is a credential check, and the failure reason shouldn't
+    // be distinguishable from "wrong password" to the caller. Bails before
+    // ever calling Argon2, which is the actual point: an unbounded password
+    // is a cheap way to burn CPU on every candidate checked below.
+    if body.password.len() > MAX_PASSWORD_LEN {
         return Err(AppError::Unauthorized);
     }
+
+    // Login must still work pre-verification, so this can't narrow to the
+    // single verified owner the way oauth_apple's fallback match does — more
+    // than one unverified row can share this email, each with its own
+    // password, so the submitted password is checked against every
+    // candidate rather than trusting an arbitrarily-chosen single match.
+    let mut user = None;
+    for candidate in repo::find_all_by_email(&state.db, &body.email).await? {
+        if let Some(hash) = candidate.password_hash.as_deref()
+            && service::verify_password(&body.password, hash)?
+        {
+            user = Some(candidate);
+            break;
+        }
+    }
+    let user = user.ok_or(AppError::Unauthorized)?;
 
     Ok(Json(
         issue_token_pair_and_build_auth_response(&state, user, user_agent(&headers)).await?,
@@ -313,6 +361,84 @@ async fn revoke_sessions(
     Ok(StatusCode::NO_CONTENT)
 }
 
+// Confirms a code sent by /auth/register, /auth/oauth/apple/complete, or
+// /auth/resend-verification. If a different, already-verified account holds
+// this same email, this proves ownership arrived after that account already
+// won it — merge onto that account instead of promoting this one, since a
+// still-unverified row can never have accumulated real data of its own.
+async fn verify_email(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    auth: AuthUser,
+    Json(body): Json<VerifyEmailRequest>,
+) -> Result<Json<AuthResponse>, AppError> {
+    let user = repo::find_by_id(&state.db, auth.user_id)
+        .await?
+        .ok_or_else(|| {
+            AppError::Internal(anyhow::anyhow!(
+                "authenticated user {} not found during email verification",
+                auth.user_id
+            ))
+        })?;
+
+    let code_hash = user
+        .email_verification_code_hash
+        .as_deref()
+        .ok_or(AppError::Unauthorized)?;
+    let expires_at = user
+        .email_verification_code_expires_at
+        .ok_or(AppError::Unauthorized)?;
+
+    // Independent of the IP-keyed rate limiter, which alone isn't enough
+    // here — a token is issued unconditionally at registration, so its
+    // holder can already call this endpoint freely regardless of which IP
+    // they're on. Once burned, only a fresh code (via resend-verification,
+    // which resets this counter) can be attempted again.
+    if user.email_verification_attempts >= MAX_VERIFICATION_ATTEMPTS {
+        return Err(AppError::Unauthorized);
+    }
+
+    if service::hash_token(&body.code) != code_hash || expires_at < Utc::now() {
+        repo::increment_verification_attempts(&state.db, user.id).await?;
+        return Err(AppError::Unauthorized);
+    }
+
+    if let Some(existing) =
+        repo::find_verified_by_email_excluding(&state.db, &user.email, user.id).await?
+    {
+        repo::merge_hollow_into_verified(&state.db, user.id, existing.id).await?;
+        return Ok(Json(
+            issue_token_pair_and_build_auth_response(&state, existing, user_agent(&headers))
+                .await?,
+        ));
+    }
+
+    let verified_user = repo::mark_email_verified(&state.db, user.id).await?;
+    Ok(Json(
+        issue_token_pair_and_build_auth_response(&state, verified_user, user_agent(&headers))
+            .await?,
+    ))
+}
+
+// No-op (still 204) if the caller is already verified — nothing to resend.
+async fn resend_verification(
+    State(state): State<AppState>,
+    auth: AuthUser,
+) -> Result<StatusCode, AppError> {
+    if auth.email_verified_at.is_none() {
+        let user = repo::find_by_id(&state.db, auth.user_id)
+            .await?
+            .ok_or_else(|| {
+                AppError::Internal(anyhow::anyhow!(
+                    "authenticated user {} not found during verification resend",
+                    auth.user_id
+                ))
+            })?;
+        issue_verification_code(&state, user.id, &user.email).await?;
+    }
+    Ok(StatusCode::NO_CONTENT)
+}
+
 // 401 if the identity token itself doesn't check out. Otherwise 204 (no
 // linked account yet — go onboard), 409 (an account with this email exists
 // but only a password backs it — prove that via /auth/oauth/apple/link),
@@ -333,32 +459,46 @@ async fn oauth_apple(
     }
 
     // No oauth_accounts row for this sub yet. If the email matches an
-    // existing user, resolve based on how that account was established.
-    if let Some(user) = repo::find_by_email(&state.db, &email).await? {
-        if user.password_hash.is_some() {
-            // Only a self-typed password backs this account — a matching
-            // email claim alone doesn't prove the caller controls it.
-            return Err(AppError::Conflict(
-                "an account with this email already exists",
-            ));
-        }
+    // existing *verified* user, resolve based on how that account was
+    // established. Scoped to the verified owner only — an unrelated,
+    // never-verified row squatting on this same email must never be able to
+    // trigger a 409 or influence auto-linking; it isn't a real conflict.
+    let Some(user) = repo::find_verified_by_email(&state.db, &email).await? else {
+        return Ok(StatusCode::NO_CONTENT.into_response());
+    };
 
-        if repo::has_verified_oauth_email(&state.db, user.id, &user.email).await? {
-            repo::link_oauth_account(&state.db, user.id, "apple", &claims.sub, &email).await?;
-            return Ok(Json(
-                issue_token_pair_and_build_auth_response(&state, user, user_agent(&headers))
-                    .await?,
-            )
-            .into_response());
-        }
+    if user.password_hash.is_some() {
+        // Only a self-typed password backs this account — a matching
+        // email claim alone doesn't prove the caller controls it.
+        return Err(AppError::Conflict(
+            "an account with this email already exists",
+        ));
+    }
 
-        tracing::error!(
-            user_id = %user.id,
-            "passwordless user has no matching oauth_accounts row — refusing to auto-link"
-        );
+    // Only a provider-verified email can grant access to an existing
+    // account with no independent proof (no password to fall back on).
+    // An unverified claim is treated as if no match were found at all —
+    // not an error, just not enough to trust here.
+    if !claims.email_verified {
         return Ok(StatusCode::NO_CONTENT.into_response());
     }
 
+    if repo::has_oauth_email(&state.db, user.id, &user.email).await? {
+        repo::link_oauth_account(&state.db, user.id, "apple", &claims.sub, &email).await?;
+        return Ok(Json(
+            issue_token_pair_and_build_auth_response(&state, user, user_agent(&headers)).await?,
+        )
+        .into_response());
+    }
+
+    // An account matching this shape (passwordless + verified) should
+    // always have a corresponding oauth_accounts row from whichever
+    // provider created/verified it — reaching here means that invariant
+    // was somehow violated. Refuse to auto-link rather than trust it.
+    tracing::error!(
+        user_id = %user.id,
+        "passwordless user has no matching oauth_accounts row — refusing to auto-link"
+    );
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 
@@ -395,6 +535,11 @@ async fn oauth_apple_complete(
         ));
     }
 
+    // Trust the provider's own claim immediately if it asserted verification;
+    // otherwise this account starts unverified, same as a password signup,
+    // and needs our own code before it can win a contested email.
+    let email_verified_at = claims.email_verified.then(Utc::now);
+
     let user = repo::create_with_oauth(
         &state.db,
         &email,
@@ -402,10 +547,13 @@ async fn oauth_apple_complete(
         &body.display_name,
         "apple",
         &claims.sub,
+        email_verified_at,
     )
     .await
     .map_err(|e| match &e {
-        sqlx::Error::Database(db_err) if db_err.constraint() == Some("users_email_key") => {
+        sqlx::Error::Database(db_err)
+            if db_err.constraint() == Some("users_email_verified_unique") =>
+        {
             AppError::Conflict("email already registered")
         }
         sqlx::Error::Database(db_err) if db_err.constraint() == Some("users_username_key") => {
@@ -413,6 +561,10 @@ async fn oauth_apple_complete(
         }
         _ => AppError::from(e),
     })?;
+
+    if email_verified_at.is_none() {
+        issue_verification_code(&state, user.id, &user.email).await?;
+    }
 
     let response =
         issue_token_pair_and_build_auth_response(&state, user, user_agent(&headers)).await?;
@@ -429,6 +581,12 @@ async fn oauth_apple_link(
 ) -> Result<Json<AuthResponse>, AppError> {
     let (claims, email) = verify_apple_identity_with_email(&state, &body.identity_token).await?;
 
+    // Same reasoning as login: rejected identically to a wrong password, and
+    // bails before ever calling Argon2.
+    if body.password.len() > MAX_PASSWORD_LEN {
+        return Err(AppError::Unauthorized);
+    }
+
     // Idempotency: a retried link call for an identity that's already linked
     // just logs the user in instead of re-checking the password.
     if let Some(user) = repo::find_by_oauth(&state.db, "apple", &claims.sub).await? {
@@ -437,7 +595,10 @@ async fn oauth_apple_link(
         ));
     }
 
-    let user = repo::find_by_email(&state.db, &email)
+    // Scoped to the verified owner, same reasoning as oauth_apple's fallback
+    // match — this is resolving that endpoint's 409, which is only ever
+    // raised against a verified account, so this lookup should agree.
+    let user = repo::find_verified_by_email(&state.db, &email)
         .await?
         .ok_or(AppError::Unauthorized)?;
 
@@ -481,7 +642,7 @@ async fn verify_apple_identity_with_email(
         state.config.apple_bundle_id.as_str(),
         state.config.apple_services_id.as_str(),
     ];
-    let claims = apple::verify_identity_token(identity_token, &valid_audiences)
+    let claims = apple::verify_identity_token(&state.http_client, identity_token, &valid_audiences)
         .await
         .map_err(|e| {
             tracing::warn!(error = %e, "apple identity token verification failed");
@@ -509,6 +670,29 @@ fn is_valid_email(email: &str) -> bool {
 
 fn user_agent(headers: &HeaderMap) -> Option<&str> {
     headers.get(axum::http::header::USER_AGENT)?.to_str().ok()
+}
+
+// Generates a code, stores its hash, and emails it. A send failure is logged
+// and swallowed rather than failing the caller's request — the code is
+// already stored, so /auth/resend-verification can recover from it.
+async fn issue_verification_code(
+    state: &AppState,
+    user_id: Uuid,
+    email: &str,
+) -> Result<(), AppError> {
+    let code = service::generate_verification_code();
+    let expires_at = Utc::now() + ChronoDuration::minutes(VERIFICATION_CODE_TTL_MINS);
+
+    repo::set_verification_code(&state.db, user_id, &service::hash_token(&code), expires_at)
+        .await?;
+
+    if let Err(e) =
+        email::send_verification_code(&state.http_client, &state.config, email, &code).await
+    {
+        tracing::error!(error = %e, user_id = %user_id, "failed to send verification email");
+    }
+
+    Ok(())
 }
 
 // Pure assembly — no I/O, reusable regardless of how the tokens were issued

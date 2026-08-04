@@ -5,6 +5,8 @@ pub struct Config {
     pub port: u16,
     pub apple_bundle_id: String,
     pub apple_services_id: String,
+    pub resend_api_key: String,
+    pub resend_from_email: String,
 }
 
 impl Config {
@@ -16,6 +18,8 @@ impl Config {
                 .context("PORT must be a valid port number (0–65535)")?,
             apple_bundle_id: required("APPLE_BUNDLE_ID")?,
             apple_services_id: required("APPLE_SERVICES_ID")?,
+            resend_api_key: required("RESEND_API_KEY")?,
+            resend_from_email: required("RESEND_FROM_EMAIL")?,
         })
     }
 }

@@ -18,6 +18,8 @@ use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 use config::Config;
 use state::AppState;
 
+use crate::error::AppError;
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     dotenvy::dotenv().ok();
@@ -36,6 +38,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/health", routing::get(health))
         .nest("/v1", auth::routes::router())
         .nest("/v1", domain::user::routes::router())
+        .fallback(fallback)
         .layer(TraceLayer::new_for_http())
         .with_state(state);
 
@@ -71,4 +74,8 @@ async fn health() -> Json<HealthResponse> {
         name: env!("CARGO_PKG_NAME"),
         version: env!("CARGO_PKG_VERSION"),
     })
+}
+
+async fn fallback() -> AppError {
+    AppError::NotFound("page")
 }

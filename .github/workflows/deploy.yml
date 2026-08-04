@@ -67,6 +67,6 @@ jobs:
             --min-instances ${{ vars.CLOUD_RUN_MIN_INSTANCES }} \
             --max-instances ${{ vars.CLOUD_RUN_MAX_INSTANCES }} \
             --timeout 300 \
-            --set-env-vars APPLE_BUNDLE_ID=${{ vars.APPLE_BUNDLE_ID }},APPLE_SERVICES_ID=${{ vars.APPLE_SERVICES_ID }} \
-            --set-secrets DATABASE_URL=DATABASE_URL:latest \
+            --set-env-vars APPLE_BUNDLE_ID=${{ vars.APPLE_BUNDLE_ID }},APPLE_SERVICES_ID=${{ vars.APPLE_SERVICES_ID }},RESEND_FROM_EMAIL=${{ vars.RESEND_FROM_EMAIL }} \
+            --set-secrets DATABASE_URL=DATABASE_URL:latest,RESEND_API_KEY=RESEND_API_KEY:latest \
             --quiet

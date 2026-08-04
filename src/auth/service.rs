@@ -11,6 +11,15 @@ pub fn generate_token(prefix: &str) -> String {
     format!("{prefix}_{}", hex::encode(bytes))
 }
 
+// 6-digit numeric code for email verification — short enough to type by hand,
+// unlike a clickable link this avoids iOS Universal Links entirely.
+pub fn generate_verification_code() -> String {
+    let mut bytes = [0u8; 4];
+    OsRng.fill_bytes(&mut bytes);
+    let n = u32::from_be_bytes(bytes) % 1_000_000;
+    format!("{n:06}")
+}
+
 pub fn hash_token(raw: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(raw.as_bytes());
@@ -51,6 +60,15 @@ mod tests {
     #[test]
     fn generate_token_is_random() {
         assert_ne!(generate_token("prefix"), generate_token("prefix"));
+    }
+
+    #[test]
+    fn generate_verification_code_is_six_digits() {
+        for _ in 0..20 {
+            let code = generate_verification_code();
+            assert_eq!(code.len(), 6);
+            assert!(code.chars().all(|c| c.is_ascii_digit()));
+        }
     }
 
     #[test]

@@ -16,6 +16,10 @@ pub struct User {
     pub target_protein_g: Option<i32>,
     pub target_sleep_hours: Option<f32>,
     pub timezone: String,
+    pub email_verified_at: Option<DateTime<Utc>>,
+    pub email_verification_code_hash: Option<String>,
+    pub email_verification_code_expires_at: Option<DateTime<Utc>>,
+    pub email_verification_attempts: i32,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -33,6 +37,7 @@ pub struct UserResponse {
     pub target_protein_g: Option<i32>,
     pub target_sleep_hours: Option<f32>,
     pub timezone: String,
+    pub email_verified_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -51,6 +56,7 @@ impl From<User> for UserResponse {
             target_protein_g: u.target_protein_g,
             target_sleep_hours: u.target_sleep_hours,
             timezone: u.timezone,
+            email_verified_at: u.email_verified_at,
             created_at: u.created_at,
             updated_at: u.updated_at,
         }
@@ -104,6 +110,11 @@ pub struct AppleCompleteRequest {
 pub struct AppleLinkRequest {
     pub identity_token: String,
     pub password: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct VerifyEmailRequest {
+    pub code: String,
 }
 
 #[derive(Debug, sqlx::FromRow, Serialize)]

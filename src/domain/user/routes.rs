@@ -2,7 +2,7 @@ use axum::{Json, Router, extract::State, routing};
 
 use super::model::UserResponse;
 use super::repo;
-use crate::auth::extractor::AuthUser;
+use crate::auth::extractor::VerifiedUser;
 use crate::error::AppError;
 use crate::state::AppState;
 
@@ -10,7 +10,10 @@ pub fn router() -> Router<AppState> {
     Router::new().route("/users/me", routing::get(me))
 }
 
-async fn me(State(state): State<AppState>, auth: AuthUser) -> Result<Json<UserResponse>, AppError> {
+async fn me(
+    State(state): State<AppState>,
+    auth: VerifiedUser,
+) -> Result<Json<UserResponse>, AppError> {
     let user = repo::find_by_id(&state.db, auth.user_id)
         .await?
         .ok_or_else(|| {
