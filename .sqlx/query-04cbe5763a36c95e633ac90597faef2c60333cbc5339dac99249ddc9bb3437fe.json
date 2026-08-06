@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id as \"id: Uuid\" FROM users\n           WHERE password_reset_token_hash = $1\n             AND password_reset_token_expires_at > now()",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id: Uuid",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "04cbe5763a36c95e633ac90597faef2c60333cbc5339dac99249ddc9bb3437fe"
+}
