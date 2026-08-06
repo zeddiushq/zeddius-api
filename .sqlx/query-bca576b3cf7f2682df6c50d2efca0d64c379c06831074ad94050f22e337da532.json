@@ -92,6 +92,16 @@
         "ordinal": 17,
         "name": "email_verification_attempts",
         "type_info": "Int4"
+      },
+      {
+        "ordinal": 18,
+        "name": "password_reset_token_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 19,
+        "name": "password_reset_token_expires_at",
+        "type_info": "Timestamptz"
       }
     ],
     "parameters": {
@@ -118,7 +128,9 @@
       true,
       true,
       true,
-      false
+      false,
+      true,
+      true
     ]
   },
   "hash": "bca576b3cf7f2682df6c50d2efca0d64c379c06831074ad94050f22e337da532"

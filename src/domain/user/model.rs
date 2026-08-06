@@ -20,6 +20,13 @@ pub struct User {
     pub email_verification_code_hash: Option<String>,
     pub email_verification_code_expires_at: Option<DateTime<Utc>>,
     pub email_verification_attempts: i32,
+    // Matching and expiry are both checked in SQL (find_by_password_reset_token),
+    // so these are never read again once a row comes back — present only
+    // because they're real columns `SELECT *` picks up.
+    #[allow(dead_code)]
+    pub password_reset_token_hash: Option<String>,
+    #[allow(dead_code)]
+    pub password_reset_token_expires_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -115,6 +122,17 @@ pub struct AppleLinkRequest {
 #[derive(Debug, Deserialize)]
 pub struct VerifyEmailRequest {
     pub code: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ForgotPasswordRequest {
+    pub email: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ResetPasswordRequest {
+    pub token: String,
+    pub new_password: String,
 }
 
 #[derive(Debug, sqlx::FromRow, Serialize)]

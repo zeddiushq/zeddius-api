@@ -98,6 +98,39 @@ flowchart TD
 More than one unverified row can share an email, so this checks the password against every
 candidate rather than trusting a single, arbitrarily-picked match.
 
+### `POST /auth/forgot-password`
+
+```mermaid
+flowchart TD
+    A[Request: email] --> B{Verified user exists<br/>with this email?}
+    B -- no --> Z[204 No Content]
+    B -- yes --> C{User has<br/>password_hash?}
+    C -- no --> Z
+    C -- yes --> D[Generate token, store hash<br/>+ 30 min expiry]
+    D --> E[Email reset link via Resend]
+    E --> Z
+```
+
+Always `204`, regardless of which branch runs — the response never signals whether the email
+matched an account, on purpose.
+
+### `POST /auth/reset-password`
+
+```mermaid
+flowchart TD
+    A[Request: token, new_password] --> B{Password 8-128 chars?}
+    B -- no --> B1[422 Validation Failed]
+    B -- yes --> C{Token hash matches an<br/>unexpired reset token?}
+    C -- no --> C1[401 Unauthorized]
+    C -- yes --> D[Set new password_hash<br/>clear reset token fields]
+    D --> E[Revoke every session<br/>for this account]
+    E --> E1[204 No Content]
+```
+
+No auth header — there's no valid session by definition. No tokens issued either; the user logs
+in fresh, since the reset usually happens on a different surface than wherever they'll next use
+the app.
+
 ### `POST /auth/refresh`
 
 ```mermaid

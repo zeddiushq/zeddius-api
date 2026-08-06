@@ -440,3 +440,88 @@ pub async fn merge_hollow_into_verified(
     tx.commit().await?;
     Ok(())
 }
+
+pub async fn set_password_reset_token(
+    db: &PgPool,
+    user_id: Uuid,
+    token_hash: &str,
+    expires_at: DateTime<Utc>,
+) -> Result<(), sqlx::Error> {
+    sqlx::query!(
+        "UPDATE users
+         SET password_reset_token_hash = $2, password_reset_token_expires_at = $3
+         WHERE id = $1",
+        user_id,
+        token_hash,
+        expires_at,
+    )
+    .execute(db)
+    .await?;
+    Ok(())
+}
+
+// Reverse lookup by token hash — no email needed, since the token alone
+// unambiguously identifies the row. Unlike find_by_refresh_token, the only
+// caller ever needs the id, so this returns just that rather than
+// constructing a full User for a row whose other fields go unused.
+pub async fn find_by_password_reset_token(
+    db: &PgPool,
+    token_hash: &str,
+) -> Result<Option<Uuid>, sqlx::Error> {
+    sqlx::query_scalar!(
+        r#"SELECT id as "id: Uuid" FROM users
+           WHERE password_reset_token_hash = $1
+             AND password_reset_token_expires_at > now()"#,
+        token_hash
+    )
+    .fetch_optional(db)
+    .await
+}
+
+// Sets a new password and burns the reset token — single-use, since a
+// replayed request with the same token no longer matches once this clears it.
+pub async fn reset_password(
+    executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
+    user_id: Uuid,
+    new_password_hash: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query!(
+        "UPDATE users
+         SET password_hash = $2,
+             password_reset_token_hash = NULL,
+             password_reset_token_expires_at = NULL
+         WHERE id = $1",
+        user_id,
+        new_password_hash,
+    )
+    .execute(executor)
+    .await?;
+    Ok(())
+}
+
+// Revokes every session for `user_id` unconditionally — unlike
+// revoke_other_sessions, there's no "current" session to exempt here, since
+// the caller isn't authenticated at all during a password reset. Deliberate:
+// a reset should kick out anyone holding the old password, which is often
+// exactly the scenario being recovered from. Takes a generic executor so the
+// caller can run it in the same transaction as reset_password — if
+// revocation failed silently after the password change already committed,
+// an old session would survive exactly the reset meant to kill it.
+pub async fn revoke_all_sessions(
+    executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
+    user_id: Uuid,
+) -> Result<(), sqlx::Error> {
+    sqlx::query!(
+        "WITH revoked_access AS (
+             UPDATE access_tokens SET revoked_at = now()
+             WHERE user_id = $1 AND revoked_at IS NULL
+             RETURNING id
+         )
+         UPDATE refresh_tokens SET revoked_at = now()
+         WHERE access_token_id IN (SELECT id FROM revoked_access)",
+        user_id,
+    )
+    .execute(executor)
+    .await?;
+    Ok(())
+}

@@ -11,24 +11,25 @@ use tokio::time;
 use tower_governor::GovernorLayer;
 use tower_governor::governor::GovernorConfigBuilder;
 use tower_governor::key_extractor::SmartIpKeyExtractor;
+use tracing::{error, warn};
 use uuid::Uuid;
 
 use super::apple;
 use super::email;
 use super::extractor::AuthUser;
 use super::service;
+use super::tokens;
 use crate::domain::user::model::{
-    AppleAuthRequest, AppleCompleteRequest, AppleLinkRequest, AuthResponse, LoginRequest,
-    RefreshRequest, RegisterRequest, Session, User, UserResponse, UsernameAvailableResponse,
-    VerifyEmailRequest,
+    AppleAuthRequest, AppleCompleteRequest, AppleLinkRequest, AuthResponse, ForgotPasswordRequest,
+    LoginRequest, RefreshRequest, RegisterRequest, ResetPasswordRequest, Session,
+    UsernameAvailableResponse, VerifyEmailRequest,
 };
 use crate::domain::user::repo;
 use crate::error::AppError;
 use crate::state::AppState;
 
-const ACCESS_TOKEN_SECS: i64 = 3600; // 1 hour
-const REFRESH_TOKEN_SECS: i64 = 365 * 24 * 3600; // 1 year
 const VERIFICATION_CODE_TTL_MINS: i64 = 15;
+const PASSWORD_RESET_TOKEN_TTL_MINS: i64 = 30;
 // A code is burned after this many wrong guesses, regardless of whether it's
 // still within its TTL — the real defense against brute-forcing a 6-digit
 // code, since the IP-keyed rate limiter alone isn't tied to any one code.
@@ -178,6 +179,8 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/auth/register", routing::post(register))
         .route("/auth/login", routing::post(login))
+        .route("/auth/forgot-password", routing::post(forgot_password))
+        .route("/auth/reset-password", routing::post(reset_password))
         .route("/auth/refresh", routing::post(refresh))
         .route("/auth/logout", routing::post(logout))
         .route(
@@ -278,7 +281,14 @@ async fn register(
 
     Ok((
         StatusCode::CREATED,
-        Json(issue_token_pair_and_build_auth_response(&state, user, user_agent(&headers)).await?),
+        Json(
+            tokens::issue_token_pair_and_build_auth_response(
+                &state,
+                user,
+                tokens::user_agent(&headers),
+            )
+            .await?,
+        ),
     ))
 }
 
@@ -313,8 +323,64 @@ async fn login(
     let user = user.ok_or(AppError::Unauthorized)?;
 
     Ok(Json(
-        issue_token_pair_and_build_auth_response(&state, user, user_agent(&headers)).await?,
+        tokens::issue_token_pair_and_build_auth_response(
+            &state,
+            user,
+            tokens::user_agent(&headers),
+        )
+        .await?,
     ))
+}
+
+// Always 204, regardless of whether the email matches a verified account —
+// this is the one place in the app deliberately choosing not to signal
+// anything back to the caller, since there's no legitimate UX reason a
+// forgot-password form needs to know whether an email is registered.
+async fn forgot_password(
+    State(state): State<AppState>,
+    Json(body): Json<ForgotPasswordRequest>,
+) -> Result<StatusCode, AppError> {
+    if let Some(user) = repo::find_verified_by_email(&state.db, &body.email).await?
+        && user.password_hash.is_some()
+    {
+        issue_password_reset_token(&state, user.id, &user.email).await?;
+    }
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn reset_password(
+    State(state): State<AppState>,
+    Json(body): Json<ResetPasswordRequest>,
+) -> Result<StatusCode, AppError> {
+    if body.new_password.len() < 8 {
+        return Err(AppError::ValidationFailed(
+            "password must be at least 8 characters".to_string(),
+        ));
+    }
+
+    if body.new_password.len() > MAX_PASSWORD_LEN {
+        return Err(AppError::ValidationFailed(format!(
+            "password must be at most {MAX_PASSWORD_LEN} characters"
+        )));
+    }
+
+    let token_hash = service::hash_token(&body.token);
+    let user_id = repo::find_by_password_reset_token(&state.db, &token_hash)
+        .await?
+        .ok_or(AppError::Unauthorized)?;
+
+    let new_password_hash = service::hash_password(&body.new_password)?;
+
+    // Same transaction: if revocation failed after the password change alone
+    // committed, the reset token would already be burned (no clean retry)
+    // while an old session — often exactly what's being recovered from —
+    // would silently survive the reset meant to kill it.
+    let mut tx = state.db.begin().await?;
+    repo::reset_password(&mut *tx, user_id, &new_password_hash).await?;
+    repo::revoke_all_sessions(&mut *tx, user_id).await?;
+    tx.commit().await?;
+
+    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn refresh(
@@ -331,10 +397,14 @@ async fn refresh(
     let mut tx = state.db.begin().await?;
     repo::revoke_token_pair_by_refresh_hash(&mut *tx, &token_hash).await?;
     let (access_token, refresh_token) =
-        issue_token_pair(&mut *tx, user.id, user_agent(&headers)).await?;
+        tokens::issue_token_pair(&mut *tx, user.id, tokens::user_agent(&headers)).await?;
     tx.commit().await?;
 
-    Ok(Json(build_auth_response(user, access_token, refresh_token)))
+    Ok(Json(tokens::build_auth_response(
+        user,
+        access_token,
+        refresh_token,
+    )))
 }
 
 async fn logout(State(state): State<AppState>, auth: AuthUser) -> Result<StatusCode, AppError> {
@@ -408,15 +478,23 @@ async fn verify_email(
     {
         repo::merge_hollow_into_verified(&state.db, user.id, existing.id).await?;
         return Ok(Json(
-            issue_token_pair_and_build_auth_response(&state, existing, user_agent(&headers))
-                .await?,
+            tokens::issue_token_pair_and_build_auth_response(
+                &state,
+                existing,
+                tokens::user_agent(&headers),
+            )
+            .await?,
         ));
     }
 
     let verified_user = repo::mark_email_verified(&state.db, user.id).await?;
     Ok(Json(
-        issue_token_pair_and_build_auth_response(&state, verified_user, user_agent(&headers))
-            .await?,
+        tokens::issue_token_pair_and_build_auth_response(
+            &state,
+            verified_user,
+            tokens::user_agent(&headers),
+        )
+        .await?,
     ))
 }
 
@@ -453,7 +531,12 @@ async fn oauth_apple(
 
     if let Some(user) = repo::find_by_oauth(&state.db, "apple", &claims.sub).await? {
         return Ok(Json(
-            issue_token_pair_and_build_auth_response(&state, user, user_agent(&headers)).await?,
+            tokens::issue_token_pair_and_build_auth_response(
+                &state,
+                user,
+                tokens::user_agent(&headers),
+            )
+            .await?,
         )
         .into_response());
     }
@@ -486,7 +569,12 @@ async fn oauth_apple(
     if repo::has_oauth_email(&state.db, user.id, &user.email).await? {
         repo::link_oauth_account(&state.db, user.id, "apple", &claims.sub, &email).await?;
         return Ok(Json(
-            issue_token_pair_and_build_auth_response(&state, user, user_agent(&headers)).await?,
+            tokens::issue_token_pair_and_build_auth_response(
+                &state,
+                user,
+                tokens::user_agent(&headers),
+            )
+            .await?,
         )
         .into_response());
     }
@@ -495,7 +583,7 @@ async fn oauth_apple(
     // always have a corresponding oauth_accounts row from whichever
     // provider created/verified it — reaching here means that invariant
     // was somehow violated. Refuse to auto-link rather than trust it.
-    tracing::error!(
+    error!(
         user_id = %user.id,
         "passwordless user has no matching oauth_accounts row — refusing to auto-link"
     );
@@ -517,8 +605,12 @@ async fn oauth_apple_complete(
     // Idempotency: a retried/duplicate completion call for an identity that's
     // already linked logs the user in instead of trying to recreate them.
     if let Some(user) = repo::find_by_oauth(&state.db, "apple", &claims.sub).await? {
-        let response =
-            issue_token_pair_and_build_auth_response(&state, user, user_agent(&headers)).await?;
+        let response = tokens::issue_token_pair_and_build_auth_response(
+            &state,
+            user,
+            tokens::user_agent(&headers),
+        )
+        .await?;
         return Ok((StatusCode::OK, Json(response)));
     }
 
@@ -566,8 +658,12 @@ async fn oauth_apple_complete(
         issue_verification_code(&state, user.id, &user.email).await?;
     }
 
-    let response =
-        issue_token_pair_and_build_auth_response(&state, user, user_agent(&headers)).await?;
+    let response = tokens::issue_token_pair_and_build_auth_response(
+        &state,
+        user,
+        tokens::user_agent(&headers),
+    )
+    .await?;
 
     Ok((StatusCode::CREATED, Json(response)))
 }
@@ -591,7 +687,12 @@ async fn oauth_apple_link(
     // just logs the user in instead of re-checking the password.
     if let Some(user) = repo::find_by_oauth(&state.db, "apple", &claims.sub).await? {
         return Ok(Json(
-            issue_token_pair_and_build_auth_response(&state, user, user_agent(&headers)).await?,
+            tokens::issue_token_pair_and_build_auth_response(
+                &state,
+                user,
+                tokens::user_agent(&headers),
+            )
+            .await?,
         ));
     }
 
@@ -614,7 +715,12 @@ async fn oauth_apple_link(
     repo::link_oauth_account(&state.db, user.id, "apple", &claims.sub, &email).await?;
 
     Ok(Json(
-        issue_token_pair_and_build_auth_response(&state, user, user_agent(&headers)).await?,
+        tokens::issue_token_pair_and_build_auth_response(
+            &state,
+            user,
+            tokens::user_agent(&headers),
+        )
+        .await?,
     ))
 }
 
@@ -645,7 +751,7 @@ async fn verify_apple_identity_with_email(
     let claims = apple::verify_identity_token(&state.http_client, identity_token, &valid_audiences)
         .await
         .map_err(|e| {
-            tracing::warn!(error = %e, "apple identity token verification failed");
+            warn!(error = %e, "apple identity token verification failed");
             AppError::Unauthorized
         })?;
 
@@ -668,10 +774,6 @@ fn is_valid_email(email: &str) -> bool {
     !local.is_empty() && domain.contains('.')
 }
 
-fn user_agent(headers: &HeaderMap) -> Option<&str> {
-    headers.get(axum::http::header::USER_AGENT)?.to_str().ok()
-}
-
 // Generates a code, stores its hash, and emails it. A send failure is logged
 // and swallowed rather than failing the caller's request — the code is
 // already stored, so /auth/resend-verification can recover from it.
@@ -689,57 +791,36 @@ async fn issue_verification_code(
     if let Err(e) =
         email::send_verification_code(&state.http_client, &state.config, email, &code).await
     {
-        tracing::error!(error = %e, user_id = %user_id, "failed to send verification email");
+        error!(error = %e, user_id = %user_id, "failed to send verification email");
     }
 
     Ok(())
 }
 
-// Pure assembly — no I/O, reusable regardless of how the tokens were issued
-// (plain pool or inside a transaction).
-fn build_auth_response(user: User, access_token: String, refresh_token: String) -> AuthResponse {
-    AuthResponse {
-        access_token,
-        refresh_token,
-        user: UserResponse::from(user),
-    }
-}
-
-async fn issue_token_pair(
-    executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
-    user_id: Uuid,
-    user_agent: Option<&str>,
-) -> Result<(String, String), AppError> {
-    let access_token = service::generate_token("zeddius_ac");
-    let refresh_token = service::generate_token("zeddius_rf");
-
-    let now = Utc::now();
-    let access_expires = now + ChronoDuration::seconds(ACCESS_TOKEN_SECS);
-    let refresh_expires = now + ChronoDuration::seconds(REFRESH_TOKEN_SECS);
-
-    repo::insert_token_pair(
-        executor,
-        user_id,
-        &service::hash_token(&access_token),
-        access_expires,
-        &service::hash_token(&refresh_token),
-        refresh_expires,
-        user_agent,
-    )
-    .await?;
-
-    Ok((access_token, refresh_token))
-}
-
-// Issues a fresh token pair against the plain pool and builds the response.
-// Covers every path except `refresh`, which needs the transactional executor.
-async fn issue_token_pair_and_build_auth_response(
+// Generates a full-entropy token (not a short code — this is clicked from a
+// link, never manually typed back), stores its hash, and emails a reset
+// link. Same log-and-swallow behavior on a Resend failure as verification
+// codes: the token is already stored, so a repeat /auth/forgot-password
+// call recovers from a failed send.
+async fn issue_password_reset_token(
     state: &AppState,
-    user: User,
-    user_agent: Option<&str>,
-) -> Result<AuthResponse, AppError> {
-    let (access_token, refresh_token) = issue_token_pair(&state.db, user.id, user_agent).await?;
-    Ok(build_auth_response(user, access_token, refresh_token))
+    user_id: Uuid,
+    email: &str,
+) -> Result<(), AppError> {
+    let token = service::generate_token("zeddius_pr");
+    let expires_at = Utc::now() + ChronoDuration::minutes(PASSWORD_RESET_TOKEN_TTL_MINS);
+
+    repo::set_password_reset_token(&state.db, user_id, &service::hash_token(&token), expires_at)
+        .await?;
+
+    let reset_url = format!("{}/reset-password?token={token}", state.config.web_base_url);
+    if let Err(e) =
+        email::send_password_reset_link(&state.http_client, &state.config, email, &reset_url).await
+    {
+        error!(error = %e, user_id = %user_id, "failed to send password reset email");
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
