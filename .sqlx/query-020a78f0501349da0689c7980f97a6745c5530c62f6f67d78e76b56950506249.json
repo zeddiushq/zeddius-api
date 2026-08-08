@@ -1,0 +1,82 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO weight_logs (user_id, recorded_at, weight_kg, body_fat_pct, muscle_mass_kg, water_pct, bone_mass_kg, source)\n         VALUES ($1, $2, $3, $4, $5, $6, $7, 'manual')\n         RETURNING id, recorded_at, weight_kg, body_fat_pct, muscle_mass_kg, water_pct, bone_mass_kg, source, source_uuid, created_at",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "recorded_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 2,
+        "name": "weight_kg",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 3,
+        "name": "body_fat_pct",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 4,
+        "name": "muscle_mass_kg",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 5,
+        "name": "water_pct",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 6,
+        "name": "bone_mass_kg",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 7,
+        "name": "source",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "source_uuid",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Timestamptz",
+        "Numeric",
+        "Numeric",
+        "Numeric",
+        "Numeric",
+        "Numeric"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "020a78f0501349da0689c7980f97a6745c5530c62f6f67d78e76b56950506249"
+}
