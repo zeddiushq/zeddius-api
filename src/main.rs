@@ -38,6 +38,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/health", routing::get(health))
         .nest("/v1", auth::routes::router())
         .nest("/v1", domain::user::routes::router())
+        .nest("/v1", domain::weight::routes::router())
         .fallback(fallback)
         .layer(TraceLayer::new_for_http())
         .with_state(state);

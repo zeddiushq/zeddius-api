@@ -2,7 +2,7 @@ use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-#[derive(Debug, sqlx::FromRow)]
+#[derive(Debug)]
 pub struct User {
     pub id: Uuid,
     pub email: String,
@@ -135,7 +135,7 @@ pub struct ResetPasswordRequest {
     pub new_password: String,
 }
 
-#[derive(Debug, sqlx::FromRow, Serialize)]
+#[derive(Debug, Serialize)]
 pub struct Session {
     pub id: Uuid,
     pub created_at: DateTime<Utc>,

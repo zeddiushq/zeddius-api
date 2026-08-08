@@ -1,0 +1,78 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, recorded_at, weight_kg, body_fat_pct, muscle_mass_kg, water_pct, bone_mass_kg, source, source_uuid, created_at\n         FROM weight_logs\n         WHERE user_id = $1 AND recorded_at BETWEEN $2 AND $3\n         ORDER BY recorded_at DESC",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "recorded_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 2,
+        "name": "weight_kg",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 3,
+        "name": "body_fat_pct",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 4,
+        "name": "muscle_mass_kg",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 5,
+        "name": "water_pct",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 6,
+        "name": "bone_mass_kg",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 7,
+        "name": "source",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "source_uuid",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Timestamptz",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "10d2a89f9e671100496d1f8ff910a4344bdf0f71da15ac07168b6c64928c52d1"
+}
