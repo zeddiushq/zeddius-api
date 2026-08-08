@@ -4,8 +4,24 @@ use axum::{
     Json,
     response::{IntoResponse, Response},
 };
-use serde_json::json;
+use serde::Serialize;
 use tracing::error;
+use utoipa::ToSchema;
+
+// The one shape every AppError variant serializes to — a single source of
+// truth for both the actual response body (into_response, below) and the
+// OpenAPI schema referenced by every non-2xx `#[utoipa::path]` response, so
+// the two can't silently drift apart.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ErrorResponse {
+    pub error: ErrorDetail,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ErrorDetail {
+    pub code: String,
+    pub message: String,
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum AppError {
@@ -52,7 +68,12 @@ impl IntoResponse for AppError {
 
         (
             status,
-            Json(json!({ "error": { "code": code, "message": message } })),
+            Json(ErrorResponse {
+                error: ErrorDetail {
+                    code: code.to_string(),
+                    message,
+                },
+            }),
         )
             .into_response()
     }

@@ -1,9 +1,10 @@
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
+use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct WeightLog {
     pub id: Uuid,
     pub recorded_at: DateTime<Utc>,
@@ -17,7 +18,7 @@ pub struct WeightLog {
     pub created_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub struct CreateWeightLogRequest {
     pub recorded_at: DateTime<Utc>,
     pub weight_kg: Decimal,
@@ -27,7 +28,7 @@ pub struct CreateWeightLogRequest {
     pub bone_mass_kg: Option<Decimal>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, IntoParams)]
 pub struct WeightLogQuery {
     pub from: Option<DateTime<Utc>>,
     pub to: Option<DateTime<Utc>>,

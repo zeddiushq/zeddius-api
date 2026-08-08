@@ -1,5 +1,6 @@
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 use uuid::Uuid;
 
 #[derive(Debug)]
@@ -31,7 +32,7 @@ pub struct User {
     pub updated_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct UserResponse {
     pub id: Uuid,
     pub email: String,
@@ -70,7 +71,7 @@ impl From<User> for UserResponse {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub struct RegisterRequest {
     pub email: String,
     pub username: String,
@@ -78,64 +79,64 @@ pub struct RegisterRequest {
     pub password: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub struct LoginRequest {
     pub email: String,
     pub password: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub struct RefreshRequest {
     pub refresh_token: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct AuthResponse {
     pub access_token: String,
     pub refresh_token: String,
     pub user: UserResponse,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct UsernameAvailableResponse {
     pub available: bool,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub struct AppleAuthRequest {
     pub identity_token: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub struct AppleCompleteRequest {
     pub identity_token: String,
     pub username: String,
     pub display_name: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub struct AppleLinkRequest {
     pub identity_token: String,
     pub password: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub struct VerifyEmailRequest {
     pub code: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub struct ForgotPasswordRequest {
     pub email: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub struct ResetPasswordRequest {
     pub token: String,
     pub new_password: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct Session {
     pub id: Uuid,
     pub created_at: DateTime<Utc>,

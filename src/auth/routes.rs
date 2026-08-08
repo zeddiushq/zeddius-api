@@ -1,9 +1,8 @@
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::{
-    Json, Router,
+    Json,
     extract::{Path, State},
-    routing,
 };
 use chrono::{Duration as ChronoDuration, Utc};
 use std::time::Duration as StdDuration;
@@ -12,6 +11,8 @@ use tower_governor::GovernorLayer;
 use tower_governor::governor::GovernorConfigBuilder;
 use tower_governor::key_extractor::SmartIpKeyExtractor;
 use tracing::{error, warn};
+use utoipa_axum::router::OpenApiRouter;
+use utoipa_axum::routes;
 use uuid::Uuid;
 
 use super::apple;
@@ -25,7 +26,7 @@ use crate::domain::user::model::{
     UsernameAvailableResponse, VerifyEmailRequest,
 };
 use crate::domain::user::repo;
-use crate::error::AppError;
+use crate::error::{AppError, ErrorResponse};
 use crate::state::AppState;
 
 const VERIFICATION_CODE_TTL_MINS: i64 = 15;
@@ -147,7 +148,7 @@ const RESERVED_USERNAMES: &[&str] = &[
     "all",
 ];
 
-pub fn router() -> Router<AppState> {
+pub fn router() -> OpenApiRouter<AppState> {
     // Applies to every /auth/* route uniformly rather than tuning per-endpoint
     // limits — login and /oauth/apple/link are the real brute-force targets
     // (they check a submitted password against a known account), but a single
@@ -176,35 +177,34 @@ pub fn router() -> Router<AppState> {
         }
     });
 
-    Router::new()
-        .route("/auth/register", routing::post(register))
-        .route("/auth/login", routing::post(login))
-        .route("/auth/forgot-password", routing::post(forgot_password))
-        .route("/auth/reset-password", routing::post(reset_password))
-        .route("/auth/refresh", routing::post(refresh))
-        .route("/auth/logout", routing::post(logout))
-        .route(
-            "/auth/sessions",
-            routing::get(list_sessions).delete(revoke_sessions),
-        )
-        .route("/auth/verify-email", routing::post(verify_email))
-        .route(
-            "/auth/resend-verification",
-            routing::post(resend_verification),
-        )
-        .route("/auth/oauth/apple", routing::post(oauth_apple))
-        .route(
-            "/auth/oauth/apple/complete",
-            routing::post(oauth_apple_complete),
-        )
-        .route("/auth/oauth/apple/link", routing::post(oauth_apple_link))
-        .route(
-            "/auth/username/{username}/available",
-            routing::get(username_available),
-        )
+    OpenApiRouter::new()
+        .routes(routes!(register))
+        .routes(routes!(login))
+        .routes(routes!(forgot_password))
+        .routes(routes!(reset_password))
+        .routes(routes!(refresh))
+        .routes(routes!(logout))
+        .routes(routes!(list_sessions, revoke_sessions))
+        .routes(routes!(verify_email))
+        .routes(routes!(resend_verification))
+        .routes(routes!(oauth_apple))
+        .routes(routes!(oauth_apple_complete))
+        .routes(routes!(oauth_apple_link))
+        .routes(routes!(username_available))
         .layer(GovernorLayer::new(governor_conf))
 }
 
+#[utoipa::path(
+    post,
+    path = "/auth/register",
+    request_body = RegisterRequest,
+    responses(
+        (status = 201, description = "Account created (unverified — a verification code was emailed)", body = AuthResponse),
+        (status = 409, description = "Email already registered to a verified account, or username taken", body = ErrorResponse),
+        (status = 422, description = "Missing fields, invalid email, or password not 8-128 characters", body = ErrorResponse),
+    ),
+    tag = "auth",
+)]
 async fn register(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -292,6 +292,16 @@ async fn register(
     ))
 }
 
+#[utoipa::path(
+    post,
+    path = "/auth/login",
+    request_body = LoginRequest,
+    responses(
+        (status = 200, description = "Signed in", body = AuthResponse),
+        (status = 401, description = "Wrong email or password", body = ErrorResponse),
+    ),
+    tag = "auth",
+)]
 async fn login(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -336,6 +346,15 @@ async fn login(
 // this is the one place in the app deliberately choosing not to signal
 // anything back to the caller, since there's no legitimate UX reason a
 // forgot-password form needs to know whether an email is registered.
+#[utoipa::path(
+    post,
+    path = "/auth/forgot-password",
+    request_body = ForgotPasswordRequest,
+    responses(
+        (status = 204, description = "Always returned regardless of whether the email matches an account — deliberately no enumeration signal. A reset link is emailed only if a matching, verified, password-holding account exists."),
+    ),
+    tag = "auth",
+)]
 async fn forgot_password(
     State(state): State<AppState>,
     Json(body): Json<ForgotPasswordRequest>,
@@ -348,6 +367,17 @@ async fn forgot_password(
     Ok(StatusCode::NO_CONTENT)
 }
 
+#[utoipa::path(
+    post,
+    path = "/auth/reset-password",
+    request_body = ResetPasswordRequest,
+    responses(
+        (status = 204, description = "Password reset; every session for the account revoked. No tokens issued — log in fresh."),
+        (status = 401, description = "Token invalid, expired, or already used", body = ErrorResponse),
+        (status = 422, description = "Password not 8-128 characters", body = ErrorResponse),
+    ),
+    tag = "auth",
+)]
 async fn reset_password(
     State(state): State<AppState>,
     Json(body): Json<ResetPasswordRequest>,
@@ -383,6 +413,16 @@ async fn reset_password(
     Ok(StatusCode::NO_CONTENT)
 }
 
+#[utoipa::path(
+    post,
+    path = "/auth/refresh",
+    request_body = RefreshRequest,
+    responses(
+        (status = 200, description = "New token pair issued; the old pair is revoked", body = AuthResponse),
+        (status = 401, description = "Refresh token invalid, expired, or revoked", body = ErrorResponse),
+    ),
+    tag = "auth",
+)]
 async fn refresh(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -407,11 +447,31 @@ async fn refresh(
     )))
 }
 
+#[utoipa::path(
+    post,
+    path = "/auth/logout",
+    responses(
+        (status = 204, description = "Current access + refresh token pair revoked"),
+        (status = 401, description = "Missing or invalid access token", body = ErrorResponse),
+    ),
+    security(("bearer_auth" = [])),
+    tag = "auth",
+)]
 async fn logout(State(state): State<AppState>, auth: AuthUser) -> Result<StatusCode, AppError> {
     repo::revoke_token_pair_by_access_hash(&state.db, &auth.token_hash).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
+#[utoipa::path(
+    get,
+    path = "/auth/sessions",
+    responses(
+        (status = 200, description = "The caller's active token pairs (sessions)", body = Vec<Session>),
+        (status = 401, description = "Missing or invalid access token", body = ErrorResponse),
+    ),
+    security(("bearer_auth" = [])),
+    tag = "auth",
+)]
 async fn list_sessions(
     State(state): State<AppState>,
     auth: AuthUser,
@@ -423,6 +483,16 @@ async fn list_sessions(
 // Revokes every other session — the caller's own session (the one making
 // this request) stays logged in. Full logout-everywhere isn't this endpoint;
 // it's just calling /auth/logout on each session individually.
+#[utoipa::path(
+    delete,
+    path = "/auth/sessions",
+    responses(
+        (status = 204, description = "Every session except the caller's current one revoked — \"log out all other devices\""),
+        (status = 401, description = "Missing or invalid access token", body = ErrorResponse),
+    ),
+    security(("bearer_auth" = [])),
+    tag = "auth",
+)]
 async fn revoke_sessions(
     State(state): State<AppState>,
     auth: AuthUser,
@@ -436,6 +506,17 @@ async fn revoke_sessions(
 // this same email, this proves ownership arrived after that account already
 // won it — merge onto that account instead of promoting this one, since a
 // still-unverified row can never have accumulated real data of its own.
+#[utoipa::path(
+    post,
+    path = "/auth/verify-email",
+    request_body = VerifyEmailRequest,
+    responses(
+        (status = 200, description = "Email verified; fresh token pair issued. Merges into an existing verified account under the same email if one exists.", body = AuthResponse),
+        (status = 401, description = "Missing/invalid access token, no code pending, code wrong or expired, or the 5-attempt limit was burned", body = ErrorResponse),
+    ),
+    security(("bearer_auth" = [])),
+    tag = "auth",
+)]
 async fn verify_email(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -499,6 +580,16 @@ async fn verify_email(
 }
 
 // No-op (still 204) if the caller is already verified — nothing to resend.
+#[utoipa::path(
+    post,
+    path = "/auth/resend-verification",
+    responses(
+        (status = 204, description = "A fresh code was emailed (attempt counter reset), or this is a no-op because the account is already verified"),
+        (status = 401, description = "Missing or invalid access token", body = ErrorResponse),
+    ),
+    security(("bearer_auth" = [])),
+    tag = "auth",
+)]
 async fn resend_verification(
     State(state): State<AppState>,
     auth: AuthUser,
@@ -522,6 +613,18 @@ async fn resend_verification(
 // but only a password backs it — prove that via /auth/oauth/apple/link),
 // or 200 with a token pair (known user), distinguished by status code alone
 // so the client never has to inspect the body to know which case it's in.
+#[utoipa::path(
+    post,
+    path = "/auth/oauth/apple",
+    request_body = AppleAuthRequest,
+    responses(
+        (status = 200, description = "Identity already linked to a known user", body = AuthResponse),
+        (status = 204, description = "No account exists yet — client should call /auth/oauth/apple/complete"),
+        (status = 401, description = "The identity token itself doesn't verify (bad signature, claims, or missing email)", body = ErrorResponse),
+        (status = 409, description = "The email matches an existing account that has a password — prove it via /auth/oauth/apple/link", body = ErrorResponse),
+    ),
+    tag = "auth",
+)]
 async fn oauth_apple(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -595,6 +698,19 @@ async fn oauth_apple(
 // (re-verified here), not a Bearer access token — none exists yet, since no
 // user record exists yet. `register` never calls this; it creates its row
 // directly in one step.
+#[utoipa::path(
+    post,
+    path = "/auth/oauth/apple/complete",
+    request_body = AppleCompleteRequest,
+    responses(
+        (status = 200, description = "Identity was already linked (retried/duplicate call) — logged in", body = AuthResponse),
+        (status = 201, description = "New user created and linked to this Apple identity", body = AuthResponse),
+        (status = 401, description = "The identity token itself doesn't verify", body = ErrorResponse),
+        (status = 409, description = "Email already registered to a verified account, or username taken", body = ErrorResponse),
+        (status = 422, description = "Missing username/display_name, or username reserved", body = ErrorResponse),
+    ),
+    tag = "auth",
+)]
 async fn oauth_apple_complete(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -670,6 +786,16 @@ async fn oauth_apple_complete(
 
 // Resolves a 409 from /auth/oauth/apple: proves the caller controls the
 // existing password-holding account before linking this Apple identity to it.
+#[utoipa::path(
+    post,
+    path = "/auth/oauth/apple/link",
+    request_body = AppleLinkRequest,
+    responses(
+        (status = 200, description = "Password verified; Apple identity linked to the existing account (or was already linked)", body = AuthResponse),
+        (status = 401, description = "The identity token doesn't verify, or the password is wrong", body = ErrorResponse),
+    ),
+    tag = "auth",
+)]
 async fn oauth_apple_link(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -724,6 +850,15 @@ async fn oauth_apple_link(
     ))
 }
 
+#[utoipa::path(
+    get,
+    path = "/auth/username/{username}/available",
+    params(("username" = String, Path, description = "Username to check")),
+    responses(
+        (status = 200, description = "Availability check result", body = UsernameAvailableResponse),
+    ),
+    tag = "auth",
+)]
 async fn username_available(
     State(state): State<AppState>,
     Path(username): Path<String>,

@@ -1,34 +1,36 @@
+use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
-use axum::{Json, Router, routing};
 use chrono::{Duration as ChronoDuration, Utc};
 use rust_decimal::Decimal;
+use utoipa_axum::router::OpenApiRouter;
+use utoipa_axum::routes;
 use uuid::Uuid;
 
 use super::model::{CreateWeightLogRequest, WeightLog, WeightLogQuery};
 use super::repo;
 use crate::auth::extractor::VerifiedUser;
-use crate::error::AppError;
+use crate::error::{AppError, ErrorResponse};
 use crate::state::AppState;
 
 const DEFAULT_RANGE_DAYS: i64 = 30;
 
-pub fn router() -> Router<AppState> {
-    Router::new()
-        .route("/weight-logs", routing::get(list).post(create))
-        .route("/weight-logs/{id}", routing::delete(delete))
+pub fn router() -> OpenApiRouter<AppState> {
+    OpenApiRouter::new().routes(routes!(list, create, delete))
 }
 
-async fn create(
-    State(state): State<AppState>,
-    auth: VerifiedUser,
-    Json(req): Json<CreateWeightLogRequest>,
-) -> Result<Json<WeightLog>, AppError> {
-    validate(&req)?;
-    let log = repo::create(&state.db, auth.user_id, &req).await?;
-    Ok(Json(log))
-}
-
+#[utoipa::path(
+    get,
+    path = "/weight-logs",
+    params(WeightLogQuery),
+    responses(
+        (status = 200, description = "Recent weight entries, most recent first. Defaults to the last 30 days when from/to are omitted.", body = Vec<WeightLog>),
+        (status = 401, description = "Missing or invalid access token", body = ErrorResponse),
+        (status = 403, description = "Account email not verified", body = ErrorResponse),
+    ),
+    security(("bearer_auth" = [])),
+    tag = "weight",
+)]
 async fn list(
     State(state): State<AppState>,
     auth: VerifiedUser,
@@ -42,6 +44,41 @@ async fn list(
     Ok(Json(logs))
 }
 
+#[utoipa::path(
+    post,
+    path = "/weight-logs",
+    request_body = CreateWeightLogRequest,
+    responses(
+        (status = 200, description = "Weight log created", body = WeightLog),
+        (status = 401, description = "Missing or invalid access token", body = ErrorResponse),
+        (status = 403, description = "Account email not verified", body = ErrorResponse),
+        (status = 422, description = "weight_kg must be positive; body_fat_pct/water_pct must be 0-100; muscle_mass_kg/bone_mass_kg must be positive", body = ErrorResponse),
+    ),
+    security(("bearer_auth" = [])),
+    tag = "weight",
+)]
+async fn create(
+    State(state): State<AppState>,
+    auth: VerifiedUser,
+    Json(req): Json<CreateWeightLogRequest>,
+) -> Result<Json<WeightLog>, AppError> {
+    validate(&req)?;
+    let log = repo::create(&state.db, auth.user_id, &req).await?;
+    Ok(Json(log))
+}
+
+#[utoipa::path(
+    delete,
+    path = "/weight-logs/{id}",
+    params(("id" = Uuid, Path, description = "Weight log id")),
+    responses(
+        (status = 204, description = "Deleted"),
+        (status = 401, description = "Missing or invalid access token", body = ErrorResponse),
+        (status = 404, description = "Not found, or not owned by the caller", body = ErrorResponse),
+    ),
+    security(("bearer_auth" = [])),
+    tag = "weight",
+)]
 async fn delete(
     State(state): State<AppState>,
     auth: VerifiedUser,

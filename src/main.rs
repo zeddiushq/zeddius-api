@@ -3,19 +3,24 @@ mod config;
 mod db;
 mod domain;
 mod error;
+mod openapi;
 mod state;
 
 use std::net::SocketAddr;
 
 use anyhow::Context;
-use axum::{Json, Router, routing};
+use axum::{Json, routing};
 use serde::Serialize;
 use tokio::net::TcpListener;
 use tower_http::trace::TraceLayer;
 use tracing::info;
 use tracing_subscriber::{EnvFilter, fmt, prelude::*};
+use utoipa::OpenApi;
+use utoipa_axum::router::OpenApiRouter;
+use utoipa_scalar::{Scalar, Servable};
 
 use config::Config;
+use openapi::ApiDoc;
 use state::AppState;
 
 use crate::error::AppError;
@@ -34,11 +39,15 @@ async fn main() -> anyhow::Result<()> {
     let state = AppState::new(db, config);
     let port = state.config.port;
 
-    let app = Router::new()
-        .route("/health", routing::get(health))
+    let (router, api) = OpenApiRouter::with_openapi(ApiDoc::openapi())
         .nest("/v1", auth::routes::router())
         .nest("/v1", domain::user::routes::router())
         .nest("/v1", domain::weight::routes::router())
+        .split_for_parts();
+
+    let app = router
+        .route("/health", routing::get(health))
+        .merge(Scalar::with_url("/docs", api))
         .fallback(fallback)
         .layer(TraceLayer::new_for_http())
         .with_state(state);
