@@ -8,8 +8,13 @@ on:
       - closed
 
 jobs:
-  build:
-    name: Build
+  # Dev and prod are fully independent GCP projects with no shared resources
+  # (each project's WIF trust policy only accepts tokens carrying its own
+  # environment claim, so one job can't authenticate to both). Both jobs
+  # check out the same merge commit and build independently, then each
+  # pushes the same version tag into its own project's own registry.
+  push-prod:
+    name: Push image (prod)
     runs-on: ubuntu-latest
     if: github.event.pull_request.merged == true
     environment: production
@@ -17,6 +22,8 @@ jobs:
       contents: write
       id-token: write
       pull-requests: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
 
     steps:
       - name: Create GitHub App token
@@ -31,16 +38,16 @@ jobs:
         with:
           token: ${{ steps.app-token.outputs.token }}
 
+      - name: Read version
+        id: version
+        run: echo "version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')" >> $GITHUB_OUTPUT
+
       - name: Setup GCP
         uses: zeddiushq/github-actions/setup-gcp@main
         with:
           workload_identity_provider: ${{ vars.WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ vars.SERVICE_ACCOUNT }}
           registry: us-central1-docker.pkg.dev
-
-      - name: Read version
-        id: version
-        run: echo "version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')" >> $GITHUB_OUTPUT
 
       - name: Build and push Docker image
         run: |
@@ -70,3 +77,33 @@ jobs:
           git add Cargo.toml Cargo.lock
           git commit -m "chore: bump version to $(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')"
           git push
+
+  push-dev:
+    name: Push image (dev)
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.merged == true
+    environment: development
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Read version
+        id: version
+        run: echo "version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')" >> $GITHUB_OUTPUT
+
+      - name: Setup GCP
+        uses: zeddiushq/github-actions/setup-gcp@main
+        with:
+          workload_identity_provider: ${{ vars.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.SERVICE_ACCOUNT }}
+          registry: us-central1-docker.pkg.dev
+
+      - name: Build and push Docker image
+        run: |
+          docker build \
+            -t us-central1-docker.pkg.dev/${{ vars.GCP_PROJECT }}/docker/zeddius-api:${{ steps.version.outputs.version }} .
+          docker push us-central1-docker.pkg.dev/${{ vars.GCP_PROJECT }}/docker/zeddius-api:${{ steps.version.outputs.version }}
