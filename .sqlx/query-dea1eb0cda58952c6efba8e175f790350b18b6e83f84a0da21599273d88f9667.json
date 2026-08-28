@@ -1,0 +1,69 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE workouts SET\n            type = COALESCE($3, type),\n            started_at = COALESCE($4, started_at),\n            ended_at = COALESCE($5, ended_at),\n            notes = COALESCE($6, notes)\n         WHERE id = $1 AND user_id = $2\n         RETURNING id, type as \"type!\", started_at, ended_at, notes, source, source_uuid, created_at",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "type!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "started_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 3,
+        "name": "ended_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 4,
+        "name": "notes",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "source",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "source_uuid",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Timestamptz",
+        "Timestamptz",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "dea1eb0cda58952c6efba8e175f790350b18b6e83f84a0da21599273d88f9667"
+}
