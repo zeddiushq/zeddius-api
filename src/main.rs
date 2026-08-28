@@ -43,6 +43,8 @@ async fn main() -> anyhow::Result<()> {
         .nest("/v1", auth::routes::router())
         .nest("/v1", domain::user::routes::router())
         .nest("/v1", domain::weight::routes::router())
+        .nest("/v1", domain::sleep::routes::router())
+        .nest("/v1", domain::food::routes::router())
         .split_for_parts();
 
     let app = router
