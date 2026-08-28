@@ -1,0 +1,90 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO food_entries (user_id, consumed_at, name, kcal, protein_g, carbs_g, fat_g, portion_count, meal_slot, source)\n         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'manual')\n         RETURNING id, consumed_at, name, kcal, protein_g, carbs_g, fat_g, source, portion_count, meal_slot, created_at",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "consumed_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 2,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "kcal",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 4,
+        "name": "protein_g",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 5,
+        "name": "carbs_g",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 6,
+        "name": "fat_g",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 7,
+        "name": "source",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "portion_count",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 9,
+        "name": "meal_slot",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Timestamptz",
+        "Text",
+        "Numeric",
+        "Numeric",
+        "Numeric",
+        "Numeric",
+        "Numeric",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      false,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "400eb48fdb19c687abf5b50e72bde28b4ca254483739a53ab41b793b1ab6fe32"
+}

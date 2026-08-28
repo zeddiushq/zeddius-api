@@ -1,0 +1,99 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO sleep_logs (user_id, date, bed_time, wake_time, duration_minutes, quality_score, source)\n         VALUES ($1, $2, $3, $4, $5, $6, 'manual')\n         RETURNING id, date, bed_time, wake_time, duration_minutes, quality_score, deep_minutes, rem_minutes, core_minutes, awake_minutes, source, source_uuid, created_at",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "date",
+        "type_info": "Date"
+      },
+      {
+        "ordinal": 2,
+        "name": "bed_time",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 3,
+        "name": "wake_time",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 4,
+        "name": "duration_minutes",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 5,
+        "name": "quality_score",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 6,
+        "name": "deep_minutes",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 7,
+        "name": "rem_minutes",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 8,
+        "name": "core_minutes",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 9,
+        "name": "awake_minutes",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 10,
+        "name": "source",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "source_uuid",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 12,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Date",
+        "Timestamptz",
+        "Timestamptz",
+        "Int4",
+        "Int2"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "601c8f103c6b2965599ea3804da2592eb99b2fedfbcb87c7dbc6dd95cc9e0285"
+}

@@ -1,0 +1,91 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE food_entries SET\n            consumed_at = COALESCE($3, consumed_at),\n            name = COALESCE($4, name),\n            kcal = COALESCE($5, kcal),\n            protein_g = COALESCE($6, protein_g),\n            carbs_g = COALESCE($7, carbs_g),\n            fat_g = COALESCE($8, fat_g),\n            portion_count = COALESCE($9, portion_count),\n            meal_slot = COALESCE($10, meal_slot)\n         WHERE id = $1 AND user_id = $2\n         RETURNING id, consumed_at, name, kcal, protein_g, carbs_g, fat_g, source, portion_count, meal_slot, created_at",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "consumed_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 2,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "kcal",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 4,
+        "name": "protein_g",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 5,
+        "name": "carbs_g",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 6,
+        "name": "fat_g",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 7,
+        "name": "source",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "portion_count",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 9,
+        "name": "meal_slot",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Timestamptz",
+        "Text",
+        "Numeric",
+        "Numeric",
+        "Numeric",
+        "Numeric",
+        "Numeric",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      false,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "6960ce16823e9422bb2f6780b12e8e74999a6d5f22206586f2cc54148f739637"
+}
