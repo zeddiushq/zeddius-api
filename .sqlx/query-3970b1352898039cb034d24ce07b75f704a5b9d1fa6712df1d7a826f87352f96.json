@@ -1,0 +1,70 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, workout_id, distance_meters, duration_seconds, avg_pace_seconds_per_km, avg_heart_rate, max_heart_rate, elevation_gain_meters, gps_path_url\n         FROM run_sessions\n         WHERE workout_id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "workout_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "distance_meters",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 3,
+        "name": "duration_seconds",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 4,
+        "name": "avg_pace_seconds_per_km",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 5,
+        "name": "avg_heart_rate",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 6,
+        "name": "max_heart_rate",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 7,
+        "name": "elevation_gain_meters",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 8,
+        "name": "gps_path_url",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "3970b1352898039cb034d24ce07b75f704a5b9d1fa6712df1d7a826f87352f96"
+}
