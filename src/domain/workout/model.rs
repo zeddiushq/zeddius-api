@@ -4,10 +4,11 @@ use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
 
-// `lift_sets` isn't a `workouts` column, so it's never part of the
-// `query_as!`-mapped row (see `repo::WorkoutRow`) — it's attached afterward.
-// `repo::list`/`create` leave it empty (keeps those to one lightweight
-// query); `repo::get` fetches the real sets in a second query.
+// Neither `lift_sets` nor `run_session` is a `workouts` column, so neither is
+// part of the `query_as!`-mapped row (see `repo::WorkoutRow`) — both are
+// attached afterward. `repo::list`/`create` leave them empty/None (keeps
+// those to one lightweight query); `repo::get` fetches both in two more
+// queries.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct Workout {
     pub id: Uuid,
@@ -19,6 +20,7 @@ pub struct Workout {
     pub source_uuid: Option<String>,
     pub created_at: DateTime<Utc>,
     pub lift_sets: Vec<LiftSet>,
+    pub run_session: Option<RunSession>,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -100,4 +102,30 @@ pub struct UpdateLiftSetRequest {
     pub actual_weight_kg: Option<Decimal>,
     pub rpe: Option<Decimal>,
     pub notes: Option<String>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct RunSession {
+    pub id: Uuid,
+    pub workout_id: Uuid,
+    pub distance_meters: Decimal,
+    pub duration_seconds: i32,
+    pub avg_pace_seconds_per_km: Option<i32>,
+    pub avg_heart_rate: Option<i16>,
+    pub max_heart_rate: Option<i16>,
+    pub elevation_gain_meters: Option<Decimal>,
+    pub gps_path_url: Option<String>,
+}
+
+// No `avg_pace_seconds_per_km` field — it's always computed server-side from
+// distance/duration (see `routes::compute_pace`), never trusted from the
+// client, same spirit as sleep_logs' `duration_minutes`. No `gps_path_url`
+// either — unused until a non-manual (HealthKit/Watch) source exists.
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct CreateRunSessionRequest {
+    pub distance_meters: Decimal,
+    pub duration_seconds: i32,
+    pub avg_heart_rate: Option<i16>,
+    pub max_heart_rate: Option<i16>,
+    pub elevation_gain_meters: Option<Decimal>,
 }

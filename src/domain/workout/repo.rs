@@ -3,13 +3,13 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use super::model::{
-    CreateLiftSetRequest, CreateWorkoutRequest, LiftSet, UpdateLiftSetRequest,
-    UpdateWorkoutRequest, Workout,
+    CreateLiftSetRequest, CreateRunSessionRequest, CreateWorkoutRequest, LiftSet, RunSession,
+    UpdateLiftSetRequest, UpdateWorkoutRequest, Workout,
 };
 
-// Mirrors the `workouts` columns exactly (no `lift_sets` — that's not a
-// column). `query_as!` maps onto this, then each caller attaches
-// `lift_sets` explicitly via `into_workout`.
+// Mirrors the `workouts` columns exactly (no `lift_sets`/`run_session` —
+// neither is a column). `query_as!` maps onto this, then each caller
+// attaches both explicitly via `into_workout`.
 struct WorkoutRow {
     id: Uuid,
     r#type: String,
@@ -22,7 +22,7 @@ struct WorkoutRow {
 }
 
 impl WorkoutRow {
-    fn into_workout(self, lift_sets: Vec<LiftSet>) -> Workout {
+    fn into_workout(self, lift_sets: Vec<LiftSet>, run_session: Option<RunSession>) -> Workout {
         Workout {
             id: self.id,
             r#type: self.r#type,
@@ -33,6 +33,7 @@ impl WorkoutRow {
             source_uuid: self.source_uuid,
             created_at: self.created_at,
             lift_sets,
+            run_session,
         }
     }
 }
@@ -55,7 +56,7 @@ pub async fn create(
     )
     .fetch_one(db)
     .await?;
-    Ok(row.into_workout(Vec::new()))
+    Ok(row.into_workout(Vec::new(), None))
 }
 
 pub async fn list(
@@ -78,12 +79,12 @@ pub async fn list(
     .await?;
     Ok(rows
         .into_iter()
-        .map(|r| r.into_workout(Vec::new()))
+        .map(|r| r.into_workout(Vec::new(), None))
         .collect())
 }
 
-// Detail fetch: also populates `lift_sets` with a second query, unlike
-// `list`/`create` which leave it empty.
+// Detail fetch: also populates `lift_sets`/`run_session` with two more
+// queries, unlike `list`/`create` which leave both empty/None.
 pub async fn get(db: &PgPool, id: Uuid, user_id: Uuid) -> Result<Option<Workout>, sqlx::Error> {
     let row = sqlx::query_as!(
         WorkoutRow,
@@ -100,7 +101,8 @@ pub async fn get(db: &PgPool, id: Uuid, user_id: Uuid) -> Result<Option<Workout>
         return Ok(None);
     };
     let lift_sets = list_lift_sets(db, id).await?;
-    Ok(Some(row.into_workout(lift_sets)))
+    let run_session = get_run_session(db, id).await?;
+    Ok(Some(row.into_workout(lift_sets, run_session)))
 }
 
 // COALESCE means an omitted field is left unchanged, not cleared. Returns
@@ -129,12 +131,13 @@ pub async fn update(
     )
     .fetch_optional(db)
     .await?;
-    Ok(row.map(|r| r.into_workout(Vec::new())))
+    Ok(row.map(|r| r.into_workout(Vec::new(), None)))
 }
 
 // Ownership-scoped: only deletes if `id` belongs to `user_id`. Returns
 // whether a row was actually removed so the handler can 404 rather than
-// distinguish "not found" from "not yours." lift_sets cascade via the FK.
+// distinguish "not found" from "not yours." lift_sets/run_session cascade
+// via their FKs.
 pub async fn delete(db: &PgPool, id: Uuid, user_id: Uuid) -> Result<bool, sqlx::Error> {
     let result = sqlx::query!(
         "DELETE FROM workouts WHERE id = $1 AND user_id = $2",
@@ -243,5 +246,52 @@ pub async fn update_lift_set(
         req.notes,
     )
     .fetch_optional(db)
+    .await
+}
+
+pub async fn get_run_session(
+    db: &PgPool,
+    workout_id: Uuid,
+) -> Result<Option<RunSession>, sqlx::Error> {
+    sqlx::query_as!(
+        RunSession,
+        r#"SELECT id, workout_id, distance_meters, duration_seconds, avg_pace_seconds_per_km, avg_heart_rate, max_heart_rate, elevation_gain_meters, gps_path_url
+         FROM run_sessions
+         WHERE workout_id = $1"#,
+        workout_id,
+    )
+    .fetch_optional(db)
+    .await
+}
+
+// One run session per workout (workout_id is UNIQUE) — re-posting replaces
+// whatever was there, rather than erroring.
+pub async fn upsert_run_session(
+    db: &PgPool,
+    workout_id: Uuid,
+    req: &CreateRunSessionRequest,
+    avg_pace_seconds_per_km: i32,
+) -> Result<RunSession, sqlx::Error> {
+    sqlx::query_as!(
+        RunSession,
+        r#"INSERT INTO run_sessions (workout_id, distance_meters, duration_seconds, avg_pace_seconds_per_km, avg_heart_rate, max_heart_rate, elevation_gain_meters)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         ON CONFLICT (workout_id) DO UPDATE SET
+            distance_meters = EXCLUDED.distance_meters,
+            duration_seconds = EXCLUDED.duration_seconds,
+            avg_pace_seconds_per_km = EXCLUDED.avg_pace_seconds_per_km,
+            avg_heart_rate = EXCLUDED.avg_heart_rate,
+            max_heart_rate = EXCLUDED.max_heart_rate,
+            elevation_gain_meters = EXCLUDED.elevation_gain_meters
+         RETURNING id, workout_id, distance_meters, duration_seconds, avg_pace_seconds_per_km, avg_heart_rate, max_heart_rate, elevation_gain_meters, gps_path_url"#,
+        workout_id,
+        req.distance_meters,
+        req.duration_seconds,
+        avg_pace_seconds_per_km,
+        req.avg_heart_rate,
+        req.max_heart_rate,
+        req.elevation_gain_meters,
+    )
+    .fetch_one(db)
     .await
 }

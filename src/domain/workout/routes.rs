@@ -2,13 +2,15 @@ use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use chrono::{Duration as ChronoDuration, Utc};
+use rust_decimal::Decimal;
+use rust_decimal::prelude::ToPrimitive;
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 use uuid::Uuid;
 
 use super::model::{
-    BulkCreateLiftSetsRequest, CreateWorkoutRequest, LiftSet, UpdateLiftSetRequest,
-    UpdateWorkoutRequest, WORKOUT_TYPES, Workout, WorkoutQuery,
+    BulkCreateLiftSetsRequest, CreateRunSessionRequest, CreateWorkoutRequest, LiftSet, RunSession,
+    UpdateLiftSetRequest, UpdateWorkoutRequest, WORKOUT_TYPES, Workout, WorkoutQuery,
 };
 use super::repo;
 use crate::auth::extractor::VerifiedUser;
@@ -28,6 +30,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(get_workout, update, delete))
         .routes(routes!(create_lift_sets))
         .routes(routes!(update_lift_set))
+        .routes(routes!(create_run_session))
 }
 
 #[utoipa::path(
@@ -84,7 +87,7 @@ async fn create(
     path = "/workouts/{id}",
     params(("id" = Uuid, Path, description = "Workout id")),
     responses(
-        (status = 200, description = "Workout detail, with its lift_sets populated (run_session nesting arrives in Chunk 5).", body = Workout),
+        (status = 200, description = "Workout detail, with its lift_sets and run_session (if any) populated.", body = Workout),
         (status = 401, description = "Missing or invalid access token", body = ErrorResponse),
         (status = 404, description = "Not found, or not owned by the caller", body = ErrorResponse),
     ),
@@ -236,6 +239,57 @@ async fn update_lift_set(
 ) -> Result<Json<LiftSet>, AppError> {
     let set = repo::update_lift_set(&state.db, id, auth.user_id, &req).await?;
     set.map(Json).ok_or(AppError::NotFound("lift set"))
+}
+
+#[utoipa::path(
+    post,
+    path = "/workouts/{id}/run-session",
+    params(("id" = Uuid, Path, description = "Workout id")),
+    request_body = CreateRunSessionRequest,
+    responses(
+        (status = 200, description = "Run session created or replaced (one per workout — re-posting overwrites). avg_pace_seconds_per_km is always computed server-side from distance/duration.", body = RunSession),
+        (status = 401, description = "Missing or invalid access token", body = ErrorResponse),
+        (status = 404, description = "Workout not found, or not owned by the caller", body = ErrorResponse),
+        (status = 422, description = "distance_meters and duration_seconds must be positive", body = ErrorResponse),
+    ),
+    security(("bearer_auth" = [])),
+    tag = "workouts",
+)]
+async fn create_run_session(
+    State(state): State<AppState>,
+    auth: VerifiedUser,
+    Path(workout_id): Path<Uuid>,
+    Json(req): Json<CreateRunSessionRequest>,
+) -> Result<Json<RunSession>, AppError> {
+    if repo::get(&state.db, workout_id, auth.user_id)
+        .await?
+        .is_none()
+    {
+        return Err(AppError::NotFound("workout"));
+    }
+    if req.distance_meters <= Decimal::ZERO {
+        return Err(AppError::ValidationFailed(
+            "distance_meters must be positive".into(),
+        ));
+    }
+    if req.duration_seconds <= 0 {
+        return Err(AppError::ValidationFailed(
+            "duration_seconds must be positive".into(),
+        ));
+    }
+    let avg_pace_seconds_per_km = compute_pace(req.distance_meters, req.duration_seconds);
+    let session =
+        repo::upsert_run_session(&state.db, workout_id, &req, avg_pace_seconds_per_km).await?;
+    Ok(Json(session))
+}
+
+// Never trust a client-computed pace — same spirit as sleep_logs'
+// duration_minutes. Both inputs are already validated positive by the
+// caller, so the division is safe.
+fn compute_pace(distance_meters: Decimal, duration_seconds: i32) -> i32 {
+    let distance_km = distance_meters / Decimal::from(1000);
+    let pace = Decimal::from(duration_seconds) / distance_km;
+    pace.round().to_i32().unwrap_or(0)
 }
 
 fn validate_type(ty: &str) -> Result<(), AppError> {
