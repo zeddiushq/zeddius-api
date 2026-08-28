@@ -3339,7 +3339,7 @@ dependencies = [
 
 [[package]]
 name = "zeddius-api"
-version = "0.1.11"
+version = "0.1.12"
 dependencies = [
  "anyhow",
  "argon2",
