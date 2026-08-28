@@ -1,0 +1,82 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, workout_id, exercise_id, set_number, target_reps_min, target_reps_max, target_weight_kg, actual_reps, actual_weight_kg, rpe, notes\n         FROM lift_sets\n         WHERE workout_id = $1\n         ORDER BY exercise_id, set_number",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "workout_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "exercise_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "set_number",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 4,
+        "name": "target_reps_min",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 5,
+        "name": "target_reps_max",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 6,
+        "name": "target_weight_kg",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 7,
+        "name": "actual_reps",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 8,
+        "name": "actual_weight_kg",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 9,
+        "name": "rpe",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 10,
+        "name": "notes",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "ba4e02d8a11b4b9b0e231c81d03c32f014e02898b87fffb00ddeb6bea8f41834"
+}
