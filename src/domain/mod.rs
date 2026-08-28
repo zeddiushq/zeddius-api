@@ -1,3 +1,4 @@
+pub mod exercise;
 pub mod food;
 pub mod sleep;
 pub mod user;
