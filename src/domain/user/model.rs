@@ -1,4 +1,5 @@
 use chrono::{DateTime, NaiveDate, Utc};
+use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
@@ -16,6 +17,7 @@ pub struct User {
     pub target_calories: Option<i32>,
     pub target_protein_g: Option<i32>,
     pub target_sleep_hours: Option<f32>,
+    pub target_weight_kg: Option<Decimal>,
     pub timezone: String,
     pub email_verified_at: Option<DateTime<Utc>>,
     pub email_verification_code_hash: Option<String>,
@@ -44,6 +46,7 @@ pub struct UserResponse {
     pub target_calories: Option<i32>,
     pub target_protein_g: Option<i32>,
     pub target_sleep_hours: Option<f32>,
+    pub target_weight_kg: Option<Decimal>,
     pub timezone: String,
     pub email_verified_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
@@ -63,12 +66,29 @@ impl From<User> for UserResponse {
             target_calories: u.target_calories,
             target_protein_g: u.target_protein_g,
             target_sleep_hours: u.target_sleep_hours,
+            target_weight_kg: u.target_weight_kg,
             timezone: u.timezone,
             email_verified_at: u.email_verified_at,
             created_at: u.created_at,
             updated_at: u.updated_at,
         }
     }
+}
+
+// Every field is "leave unchanged if omitted" (via SQL COALESCE in
+// repo::update), not "set to null if omitted" — same limitation as
+// UpdateFoodEntryRequest. `#[serde(default)]` on each field means a client
+// can send only the fields it's changing (unlike UpdateFoodEntryRequest,
+// which requires every key present); this is the intended shape for a
+// small settings-style PATCH.
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct UpdateUserRequest {
+    #[serde(default)]
+    pub target_calories: Option<i32>,
+    #[serde(default)]
+    pub target_protein_g: Option<i32>,
+    #[serde(default)]
+    pub target_weight_kg: Option<Decimal>,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]

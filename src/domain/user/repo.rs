@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use super::model::{Session, User};
+use super::model::{Session, UpdateUserRequest, User};
 
 // Joins to `users` so the extractor can check email_verified_at on every
 // authenticated request without a second round trip.
@@ -29,6 +29,29 @@ pub async fn find_by_id(db: &PgPool, id: Uuid) -> Result<Option<User>, sqlx::Err
     sqlx::query_as!(User, "SELECT * FROM users WHERE id = $1", id)
         .fetch_optional(db)
         .await
+}
+
+pub async fn update(
+    db: &PgPool,
+    user_id: Uuid,
+    req: &UpdateUserRequest,
+) -> Result<User, sqlx::Error> {
+    sqlx::query_as!(
+        User,
+        "UPDATE users SET
+            target_calories = COALESCE($2, target_calories),
+            target_protein_g = COALESCE($3, target_protein_g),
+            target_weight_kg = COALESCE($4, target_weight_kg),
+            updated_at = now()
+         WHERE id = $1
+         RETURNING *",
+        user_id,
+        req.target_calories,
+        req.target_protein_g,
+        req.target_weight_kg,
+    )
+    .fetch_one(db)
+    .await
 }
 
 // Multiple unverified rows can share an email (only verified rows are

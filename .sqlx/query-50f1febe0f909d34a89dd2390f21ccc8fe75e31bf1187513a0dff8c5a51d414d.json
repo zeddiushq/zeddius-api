@@ -102,6 +102,11 @@
         "ordinal": 19,
         "name": "password_reset_token_expires_at",
         "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 20,
+        "name": "target_weight_kg",
+        "type_info": "Numeric"
       }
     ],
     "parameters": {
@@ -131,6 +136,7 @@
       true,
       true,
       false,
+      true,
       true,
       true
     ]

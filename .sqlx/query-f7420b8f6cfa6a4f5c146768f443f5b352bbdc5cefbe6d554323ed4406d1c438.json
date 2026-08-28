@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "UPDATE users\n         SET email_verified_at = now(),\n             email_verification_code_hash = NULL,\n             email_verification_code_expires_at = NULL,\n             email_verification_attempts = 0\n         WHERE id = $1\n         RETURNING *",
+  "query": "UPDATE users SET\n            target_calories = COALESCE($2, target_calories),\n            target_protein_g = COALESCE($3, target_protein_g),\n            target_weight_kg = COALESCE($4, target_weight_kg),\n            updated_at = now()\n         WHERE id = $1\n         RETURNING *",
   "describe": {
     "columns": [
       {
@@ -111,7 +111,10 @@
     ],
     "parameters": {
       "Left": [
-        "Uuid"
+        "Uuid",
+        "Int4",
+        "Int4",
+        "Numeric"
       ]
     },
     "nullable": [
@@ -138,5 +141,5 @@
       true
     ]
   },
-  "hash": "abaed1b996786549a0b2d43099aa988aacc36d22ad8b59fa7cfeda26d5bfd0cb"
+  "hash": "f7420b8f6cfa6a4f5c146768f443f5b352bbdc5cefbe6d554323ed4406d1c438"
 }
