@@ -1,0 +1,114 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT w.id, w.type as \"type!\", w.started_at, w.ended_at, w.notes, w.source, w.source_uuid, w.created_at,\n             rs.id as \"run_session_id?\", rs.distance_meters as \"distance_meters?\",\n             rs.duration_seconds as \"duration_seconds?\", rs.avg_pace_seconds_per_km,\n             rs.avg_heart_rate, rs.max_heart_rate, rs.elevation_gain_meters, rs.gps_path_url\n         FROM workouts w\n         LEFT JOIN run_sessions rs ON rs.workout_id = w.id\n         WHERE w.user_id = $1 AND w.started_at BETWEEN $2 AND $3\n         ORDER BY w.started_at DESC",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "type!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "started_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 3,
+        "name": "ended_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 4,
+        "name": "notes",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "source",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "source_uuid",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "run_session_id?",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 9,
+        "name": "distance_meters?",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 10,
+        "name": "duration_seconds?",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 11,
+        "name": "avg_pace_seconds_per_km",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 12,
+        "name": "avg_heart_rate",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 13,
+        "name": "max_heart_rate",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 14,
+        "name": "elevation_gain_meters",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 15,
+        "name": "gps_path_url",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Timestamptz",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "3bef1fd7378e5d8a7f82af0ea31bcd0b6724c41b460a8d75bb9f094bf198c923"
+}

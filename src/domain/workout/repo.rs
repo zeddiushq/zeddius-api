@@ -1,4 +1,5 @@
 use chrono::{DateTime, Utc};
+use rust_decimal::Decimal;
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -59,6 +60,63 @@ pub async fn create(
     Ok(row.into_workout(Vec::new(), None))
 }
 
+// `lift_sets` stays empty here — a workout can have many, so listing them
+// for every row would bloat the response. `run_session` is a cheap 1:1, so
+// it's joined in directly rather than requiring a second request per row.
+struct WorkoutListRow {
+    id: Uuid,
+    r#type: String,
+    started_at: DateTime<Utc>,
+    ended_at: Option<DateTime<Utc>>,
+    notes: Option<String>,
+    source: String,
+    source_uuid: Option<String>,
+    created_at: DateTime<Utc>,
+    run_session_id: Option<Uuid>,
+    distance_meters: Option<Decimal>,
+    duration_seconds: Option<i32>,
+    avg_pace_seconds_per_km: Option<i32>,
+    avg_heart_rate: Option<i16>,
+    max_heart_rate: Option<i16>,
+    elevation_gain_meters: Option<Decimal>,
+    gps_path_url: Option<String>,
+}
+
+impl WorkoutListRow {
+    fn into_workout(self) -> Workout {
+        // distance_meters/duration_seconds are NOT NULL on run_sessions, so
+        // a matched join row always has them — the `expect`s document that,
+        // not a real possibility of failure.
+        let run_session = self.run_session_id.map(|id| RunSession {
+            id,
+            workout_id: self.id,
+            distance_meters: self
+                .distance_meters
+                .expect("run_sessions.distance_meters is NOT NULL"),
+            duration_seconds: self
+                .duration_seconds
+                .expect("run_sessions.duration_seconds is NOT NULL"),
+            avg_pace_seconds_per_km: self.avg_pace_seconds_per_km,
+            avg_heart_rate: self.avg_heart_rate,
+            max_heart_rate: self.max_heart_rate,
+            elevation_gain_meters: self.elevation_gain_meters,
+            gps_path_url: self.gps_path_url,
+        });
+        Workout {
+            id: self.id,
+            r#type: self.r#type,
+            started_at: self.started_at,
+            ended_at: self.ended_at,
+            notes: self.notes,
+            source: self.source,
+            source_uuid: self.source_uuid,
+            created_at: self.created_at,
+            lift_sets: Vec::new(),
+            run_session,
+        }
+    }
+}
+
 pub async fn list(
     db: &PgPool,
     user_id: Uuid,
@@ -66,21 +124,22 @@ pub async fn list(
     to: DateTime<Utc>,
 ) -> Result<Vec<Workout>, sqlx::Error> {
     let rows = sqlx::query_as!(
-        WorkoutRow,
-        r#"SELECT id, type as "type!", started_at, ended_at, notes, source, source_uuid, created_at
-         FROM workouts
-         WHERE user_id = $1 AND started_at BETWEEN $2 AND $3
-         ORDER BY started_at DESC"#,
+        WorkoutListRow,
+        r#"SELECT w.id, w.type as "type!", w.started_at, w.ended_at, w.notes, w.source, w.source_uuid, w.created_at,
+             rs.id as "run_session_id?", rs.distance_meters as "distance_meters?",
+             rs.duration_seconds as "duration_seconds?", rs.avg_pace_seconds_per_km,
+             rs.avg_heart_rate, rs.max_heart_rate, rs.elevation_gain_meters, rs.gps_path_url
+         FROM workouts w
+         LEFT JOIN run_sessions rs ON rs.workout_id = w.id
+         WHERE w.user_id = $1 AND w.started_at BETWEEN $2 AND $3
+         ORDER BY w.started_at DESC"#,
         user_id,
         from,
         to,
     )
     .fetch_all(db)
     .await?;
-    Ok(rows
-        .into_iter()
-        .map(|r| r.into_workout(Vec::new(), None))
-        .collect())
+    Ok(rows.into_iter().map(WorkoutListRow::into_workout).collect())
 }
 
 // Detail fetch: also populates `lift_sets`/`run_session` with two more
