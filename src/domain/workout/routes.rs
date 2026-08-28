@@ -38,7 +38,7 @@ pub fn router() -> OpenApiRouter<AppState> {
     path = "/workouts",
     params(WorkoutQuery),
     responses(
-        (status = 200, description = "Recent workouts, most recent first. Defaults to the last 30 days when from/to are omitted. lift_sets is always empty here — fetch GET /workouts/{id} for detail.", body = Vec<Workout>),
+        (status = 200, description = "Recent workouts, most recent first. Defaults to the last 30 days when from/to are omitted. run_session is populated when present; lift_sets is always empty here — fetch GET /workouts/{id} for that.", body = Vec<Workout>),
         (status = 401, description = "Missing or invalid access token", body = ErrorResponse),
         (status = 403, description = "Account email not verified", body = ErrorResponse),
     ),
