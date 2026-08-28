@@ -1,0 +1,84 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, consumed_at, name, kcal, protein_g, carbs_g, fat_g, source, portion_count, meal_slot, created_at\n         FROM food_entries\n         WHERE user_id = $1 AND consumed_at BETWEEN $2 AND $3\n         ORDER BY consumed_at DESC",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "consumed_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 2,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "kcal",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 4,
+        "name": "protein_g",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 5,
+        "name": "carbs_g",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 6,
+        "name": "fat_g",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 7,
+        "name": "source",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "portion_count",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 9,
+        "name": "meal_slot",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Timestamptz",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      false,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "7ba6b55bb23c3fab8aadf0cf516ac5eac1286bec5c0382857cd7269160a06bbe"
+}
