@@ -1,4 +1,4 @@
-use chrono::{DateTime, NaiveDate, Utc};
+use chrono::{DateTime, NaiveDate, NaiveTime, Utc};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
@@ -18,6 +18,10 @@ pub struct User {
     pub target_protein_g: Option<i32>,
     pub target_sleep_hours: Option<f32>,
     pub target_weight_kg: Option<Decimal>,
+    pub target_wake_time: Option<NaiveTime>,
+    pub target_bed_time: Option<NaiveTime>,
+    pub target_weekly_runs: Option<i16>,
+    pub target_weekly_lifts: Option<i16>,
     pub timezone: String,
     pub email_verified_at: Option<DateTime<Utc>>,
     pub email_verification_code_hash: Option<String>,
@@ -47,6 +51,10 @@ pub struct UserResponse {
     pub target_protein_g: Option<i32>,
     pub target_sleep_hours: Option<f32>,
     pub target_weight_kg: Option<Decimal>,
+    pub target_wake_time: Option<NaiveTime>,
+    pub target_bed_time: Option<NaiveTime>,
+    pub target_weekly_runs: Option<i16>,
+    pub target_weekly_lifts: Option<i16>,
     pub timezone: String,
     pub email_verified_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
@@ -67,6 +75,10 @@ impl From<User> for UserResponse {
             target_protein_g: u.target_protein_g,
             target_sleep_hours: u.target_sleep_hours,
             target_weight_kg: u.target_weight_kg,
+            target_wake_time: u.target_wake_time,
+            target_bed_time: u.target_bed_time,
+            target_weekly_runs: u.target_weekly_runs,
+            target_weekly_lifts: u.target_weekly_lifts,
             timezone: u.timezone,
             email_verified_at: u.email_verified_at,
             created_at: u.created_at,
@@ -89,6 +101,14 @@ pub struct UpdateUserRequest {
     pub target_protein_g: Option<i32>,
     #[serde(default)]
     pub target_weight_kg: Option<Decimal>,
+    #[serde(default)]
+    pub target_wake_time: Option<NaiveTime>,
+    #[serde(default)]
+    pub target_bed_time: Option<NaiveTime>,
+    #[serde(default)]
+    pub target_weekly_runs: Option<i16>,
+    #[serde(default)]
+    pub target_weekly_lifts: Option<i16>,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
