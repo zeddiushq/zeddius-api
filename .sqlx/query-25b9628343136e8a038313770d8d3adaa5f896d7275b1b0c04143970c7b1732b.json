@@ -1,0 +1,57 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE daily_tasks SET\n            title = COALESCE($3, title),\n            recurrence = COALESCE($4, recurrence),\n            target_count_per_week = COALESCE($5, target_count_per_week),\n            active = COALESCE($6, active)\n         WHERE id = $1 AND user_id = $2\n         RETURNING id, title, recurrence, target_count_per_week, active, created_at",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "title",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "recurrence",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "target_count_per_week",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 4,
+        "name": "active",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 5,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Int2",
+        "Bool"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "25b9628343136e8a038313770d8d3adaa5f896d7275b1b0c04143970c7b1732b"
+}

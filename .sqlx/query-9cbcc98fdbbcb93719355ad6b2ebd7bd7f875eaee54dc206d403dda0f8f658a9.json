@@ -1,0 +1,55 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO daily_tasks (user_id, title, recurrence, target_count_per_week)\n         VALUES ($1, $2, $3, $4)\n         RETURNING id, title, recurrence, target_count_per_week, active, created_at",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "title",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "recurrence",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "target_count_per_week",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 4,
+        "name": "active",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 5,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Int2"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "9cbcc98fdbbcb93719355ad6b2ebd7bd7f875eaee54dc206d403dda0f8f658a9"
+}

@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, title, recurrence, target_count_per_week, active, created_at\n         FROM daily_tasks\n         WHERE user_id = $1 AND active = true\n         ORDER BY created_at",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "title",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "recurrence",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "target_count_per_week",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 4,
+        "name": "active",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 5,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "513cfe9e8a5987adfbbff0790403aada33b08ec4664fbdf4b4672a733d95e781"
+}

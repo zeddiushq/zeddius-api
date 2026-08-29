@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM daily_task_completions\n         WHERE task_id = $1 AND user_id = $2 AND completed_date = $3",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Date"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c2b9d8cd7c224a444897c7db92a9e1da7051c277b307c53890ab3e20fdcbf300"
+}

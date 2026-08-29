@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO daily_task_completions (task_id, user_id, completed_date)\n         VALUES ($1, $2, $3)\n         ON CONFLICT (task_id, completed_date) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Date"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b71e08fdd07dfa0f8963184e85107d5139b751ab1e0dc031f4186c96b49e7cb6"
+}
