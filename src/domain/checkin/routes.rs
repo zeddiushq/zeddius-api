@@ -10,13 +10,15 @@ use crate::auth::extractor::VerifiedUser;
 use crate::error::{AppError, ErrorResponse};
 use crate::state::AppState;
 
-// `upsert` and `close` are both POST at different paths — same
-// "routes! panics on two handlers sharing a method in one call" split
-// used throughout every other domain module.
+// `upsert` and `close` are both POST at different paths, so they can't
+// share a `routes!` call ("routes! panics on two handlers sharing a
+// method in one call, even at different paths" — same constraint as every
+// other domain module). `close` and `reopen` share a path but differ in
+// method, so those two combine fine.
 pub fn router() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
         .routes(routes!(list, upsert))
-        .routes(routes!(close))
+        .routes(routes!(close, reopen))
 }
 
 #[utoipa::path(
@@ -80,4 +82,26 @@ async fn close(
 ) -> Result<Json<DailyCheckin>, AppError> {
     let checkin = repo::close(&state.db, auth.user_id, date).await?;
     Ok(Json(checkin))
+}
+
+#[utoipa::path(
+    delete,
+    path = "/daily-checkins/{date}/close",
+    params(("date" = NaiveDate, Path, description = "Date to reopen, YYYY-MM-DD")),
+    responses(
+        (status = 200, description = "Reopened — closed_at cleared, tomorrow_focus untouched", body = DailyCheckin),
+        (status = 401, description = "Missing or invalid access token", body = ErrorResponse),
+        (status = 403, description = "Account email not verified", body = ErrorResponse),
+        (status = 404, description = "No check-in exists for that date (nothing to reopen)", body = ErrorResponse),
+    ),
+    security(("bearer_auth" = [])),
+    tag = "checkins",
+)]
+async fn reopen(
+    State(state): State<AppState>,
+    auth: VerifiedUser,
+    Path(date): Path<NaiveDate>,
+) -> Result<Json<DailyCheckin>, AppError> {
+    let checkin = repo::reopen(&state.db, auth.user_id, date).await?;
+    checkin.map(Json).ok_or(AppError::NotFound("daily checkin"))
 }

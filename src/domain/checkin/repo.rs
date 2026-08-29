@@ -69,3 +69,26 @@ pub async fn close(
     .fetch_one(db)
     .await
 }
+
+// Unlike `close`, not an upsert — reopening a day that was never closed
+// isn't a meaningful action, so this only updates an existing row (returns
+// None if there isn't one, letting the handler 404 rather than silently
+// create a hollow checkin).
+pub async fn reopen(
+    db: &PgPool,
+    user_id: Uuid,
+    date: NaiveDate,
+) -> Result<Option<DailyCheckin>, sqlx::Error> {
+    sqlx::query_as!(
+        DailyCheckin,
+        "UPDATE daily_checkins SET
+            closed_at = NULL,
+            updated_at = now()
+         WHERE user_id = $1 AND date = $2
+         RETURNING id, date, tomorrow_focus, closed_at, created_at, updated_at",
+        user_id,
+        date,
+    )
+    .fetch_optional(db)
+    .await
+}
