@@ -1,3 +1,4 @@
+pub mod checkin;
 pub mod exercise;
 pub mod food;
 pub mod sleep;

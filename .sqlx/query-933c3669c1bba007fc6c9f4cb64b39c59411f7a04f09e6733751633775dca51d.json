@@ -1,0 +1,53 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO daily_checkins (user_id, date, closed_at)\n         VALUES ($1, $2, now())\n         ON CONFLICT (user_id, date) DO UPDATE SET\n            closed_at = now(),\n            updated_at = now()\n         RETURNING id, date, tomorrow_focus, closed_at, created_at, updated_at",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "date",
+        "type_info": "Date"
+      },
+      {
+        "ordinal": 2,
+        "name": "tomorrow_focus",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "closed_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 4,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 5,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Date"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "933c3669c1bba007fc6c9f4cb64b39c59411f7a04f09e6733751633775dca51d"
+}
