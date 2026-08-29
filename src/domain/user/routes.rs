@@ -47,7 +47,7 @@ async fn me(
         (status = 200, description = "Profile updated. Omitted fields are left unchanged.", body = UserResponse),
         (status = 401, description = "Missing or invalid access token", body = ErrorResponse),
         (status = 403, description = "Account email not verified", body = ErrorResponse),
-        (status = 422, description = "target_calories/target_protein_g/target_weight_kg must be positive", body = ErrorResponse),
+        (status = 422, description = "target_calories/target_protein_g/target_weight_kg/target_weekly_runs/target_weekly_lifts must be positive", body = ErrorResponse),
     ),
     security(("bearer_auth" = [])),
     tag = "user",
@@ -70,6 +70,16 @@ async fn update(
     if req.target_weight_kg.is_some_and(|v| v <= Decimal::ZERO) {
         return Err(AppError::ValidationFailed(
             "target_weight_kg must be positive".into(),
+        ));
+    }
+    if req.target_weekly_runs.is_some_and(|v| v <= 0) {
+        return Err(AppError::ValidationFailed(
+            "target_weekly_runs must be positive".into(),
+        ));
+    }
+    if req.target_weekly_lifts.is_some_and(|v| v <= 0) {
+        return Err(AppError::ValidationFailed(
+            "target_weekly_lifts must be positive".into(),
         ));
     }
     let user = repo::update(&state.db, auth.user_id, &req).await?;

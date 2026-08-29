@@ -42,6 +42,10 @@ pub async fn update(
             target_calories = COALESCE($2, target_calories),
             target_protein_g = COALESCE($3, target_protein_g),
             target_weight_kg = COALESCE($4, target_weight_kg),
+            target_wake_time = COALESCE($5, target_wake_time),
+            target_bed_time = COALESCE($6, target_bed_time),
+            target_weekly_runs = COALESCE($7, target_weekly_runs),
+            target_weekly_lifts = COALESCE($8, target_weekly_lifts),
             updated_at = now()
          WHERE id = $1
          RETURNING *",
@@ -49,6 +53,10 @@ pub async fn update(
         req.target_calories,
         req.target_protein_g,
         req.target_weight_kg,
+        req.target_wake_time,
+        req.target_bed_time,
+        req.target_weekly_runs,
+        req.target_weekly_lifts,
     )
     .fetch_one(db)
     .await

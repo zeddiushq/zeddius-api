@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "UPDATE users SET\n            target_calories = COALESCE($2, target_calories),\n            target_protein_g = COALESCE($3, target_protein_g),\n            target_weight_kg = COALESCE($4, target_weight_kg),\n            updated_at = now()\n         WHERE id = $1\n         RETURNING *",
+  "query": "UPDATE users SET\n            target_calories = COALESCE($2, target_calories),\n            target_protein_g = COALESCE($3, target_protein_g),\n            target_weight_kg = COALESCE($4, target_weight_kg),\n            target_wake_time = COALESCE($5, target_wake_time),\n            target_bed_time = COALESCE($6, target_bed_time),\n            target_weekly_runs = COALESCE($7, target_weekly_runs),\n            target_weekly_lifts = COALESCE($8, target_weekly_lifts),\n            updated_at = now()\n         WHERE id = $1\n         RETURNING *",
   "describe": {
     "columns": [
       {
@@ -107,6 +107,26 @@
         "ordinal": 20,
         "name": "target_weight_kg",
         "type_info": "Numeric"
+      },
+      {
+        "ordinal": 21,
+        "name": "target_wake_time",
+        "type_info": "Time"
+      },
+      {
+        "ordinal": 22,
+        "name": "target_bed_time",
+        "type_info": "Time"
+      },
+      {
+        "ordinal": 23,
+        "name": "target_weekly_runs",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 24,
+        "name": "target_weekly_lifts",
+        "type_info": "Int2"
       }
     ],
     "parameters": {
@@ -114,7 +134,11 @@
         "Uuid",
         "Int4",
         "Int4",
-        "Numeric"
+        "Numeric",
+        "Time",
+        "Time",
+        "Int2",
+        "Int2"
       ]
     },
     "nullable": [
@@ -138,8 +162,12 @@
       false,
       true,
       true,
+      true,
+      true,
+      true,
+      true,
       true
     ]
   },
-  "hash": "f7420b8f6cfa6a4f5c146768f443f5b352bbdc5cefbe6d554323ed4406d1c438"
+  "hash": "217fd0ec053da14cf2bc4c734ce57c063ce8f3df43afbc20a891c644db41c28d"
 }
