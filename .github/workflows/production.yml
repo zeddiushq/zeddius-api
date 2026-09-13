@@ -8,11 +8,6 @@ on:
       - closed
 
 jobs:
-  # Dev and prod are fully independent GCP projects with no shared resources
-  # (each project's WIF trust policy only accepts tokens carrying its own
-  # environment claim, so one job can't authenticate to both). Both jobs
-  # check out the same merge commit and build independently, then each
-  # pushes the same version tag into its own project's own registry.
   push-prod:
     name: Push image (prod)
     runs-on: ubuntu-latest
