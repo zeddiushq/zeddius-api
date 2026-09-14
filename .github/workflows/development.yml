@@ -19,17 +19,8 @@ jobs:
       id-token: write
 
     steps:
-      - name: Create GitHub App token
-        uses: actions/create-github-app-token@v1
-        id: app-token
-        with:
-          app-id: 3410763
-          private-key: ${{ secrets.ACTIONS_BOT_PRIVATE_KEY }}
-
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          token: ${{ steps.app-token.outputs.token }}
 
       - name: Setup GCP
         uses: zeddiushq/github-actions/setup-gcp@main
