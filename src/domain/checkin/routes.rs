@@ -8,6 +8,7 @@ use super::model::{DailyCheckin, DailyCheckinQuery, UpsertDailyCheckinRequest};
 use super::repo;
 use crate::auth::extractor::VerifiedUser;
 use crate::error::{AppError, ErrorResponse};
+use crate::extract::AppJson;
 use crate::state::AppState;
 
 // `upsert` and `close` are both POST at different paths, so they can't
@@ -57,7 +58,7 @@ async fn list(
 async fn upsert(
     State(state): State<AppState>,
     auth: VerifiedUser,
-    Json(req): Json<UpsertDailyCheckinRequest>,
+    AppJson(req): AppJson<UpsertDailyCheckinRequest>,
 ) -> Result<Json<DailyCheckin>, AppError> {
     let checkin = repo::upsert(&state.db, auth.user_id, &req).await?;
     Ok(Json(checkin))

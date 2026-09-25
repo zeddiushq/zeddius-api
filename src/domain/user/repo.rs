@@ -355,22 +355,19 @@ pub async fn revoke_other_sessions(
     Ok(())
 }
 
-// A fresh code always resets the attempt counter — a new code deserves a new
-// guessing budget, and this is the only place that hands one out.
-pub async fn set_verification_code(
+pub async fn set_verification_token(
     db: &PgPool,
     user_id: Uuid,
-    code_hash: &str,
+    token_hash: &str,
     expires_at: DateTime<Utc>,
 ) -> Result<(), sqlx::Error> {
     sqlx::query!(
         "UPDATE users
-         SET email_verification_code_hash = $2,
-             email_verification_code_expires_at = $3,
-             email_verification_attempts = 0
+         SET email_verification_token_hash = $2,
+             email_verification_token_expires_at = $3
          WHERE id = $1",
         user_id,
-        code_hash,
+        token_hash,
         expires_at,
     )
     .execute(db)
@@ -378,23 +375,21 @@ pub async fn set_verification_code(
     Ok(())
 }
 
-// Bounds brute-force guessing of a single code — checked by the caller
-// against a max before trusting a submitted code, independent of the
-// IP-keyed rate limiter, which alone isn't enough here (a token is issued
-// unconditionally at registration, so the holder can already call this
-// endpoint freely regardless of which IP they're on).
-pub async fn increment_verification_attempts(
+// Unauthenticated lookup, same shape as find_by_password_reset_token — the
+// token alone identifies the row and proves ownership of its email.
+pub async fn find_by_verification_token(
     db: &PgPool,
-    user_id: Uuid,
-) -> Result<(), sqlx::Error> {
-    sqlx::query!(
-        "UPDATE users SET email_verification_attempts = email_verification_attempts + 1
-         WHERE id = $1",
-        user_id,
+    token_hash: &str,
+) -> Result<Option<User>, sqlx::Error> {
+    sqlx::query_as!(
+        User,
+        "SELECT * FROM users
+         WHERE email_verification_token_hash = $1
+           AND email_verification_token_expires_at > now()",
+        token_hash
     )
-    .execute(db)
-    .await?;
-    Ok(())
+    .fetch_optional(db)
+    .await
 }
 
 // Promotes an unverified row to verified in place — used when no other row
@@ -404,9 +399,8 @@ pub async fn mark_email_verified(db: &PgPool, user_id: Uuid) -> Result<User, sql
         User,
         "UPDATE users
          SET email_verified_at = now(),
-             email_verification_code_hash = NULL,
-             email_verification_code_expires_at = NULL,
-             email_verification_attempts = 0
+             email_verification_token_hash = NULL,
+             email_verification_token_expires_at = NULL
          WHERE id = $1
          RETURNING *",
         user_id,

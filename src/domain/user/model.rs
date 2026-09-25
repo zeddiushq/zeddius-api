@@ -24,12 +24,13 @@ pub struct User {
     pub target_weekly_lifts: Option<i16>,
     pub timezone: String,
     pub email_verified_at: Option<DateTime<Utc>>,
-    pub email_verification_code_hash: Option<String>,
-    pub email_verification_code_expires_at: Option<DateTime<Utc>>,
-    pub email_verification_attempts: i32,
-    // Matching and expiry are both checked in SQL (find_by_password_reset_token),
-    // so these are never read again once a row comes back — present only
-    // because they're real columns `SELECT *` picks up.
+    // Matching and expiry are both checked in SQL (find_by_verification_token,
+    // find_by_password_reset_token), so these are never read again once a row
+    // comes back — present only because they're real columns `SELECT *` picks up.
+    #[allow(dead_code)]
+    pub email_verification_token_hash: Option<String>,
+    #[allow(dead_code)]
+    pub email_verification_token_expires_at: Option<DateTime<Utc>>,
     #[allow(dead_code)]
     pub password_reset_token_hash: Option<String>,
     #[allow(dead_code)]
@@ -162,7 +163,7 @@ pub struct AppleLinkRequest {
 
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct VerifyEmailRequest {
-    pub code: String,
+    pub token: String,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]

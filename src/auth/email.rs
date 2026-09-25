@@ -7,18 +7,18 @@ use crate::config::Config;
 const RESEND_URL: &str = "https://api.resend.com/emails";
 const FROM_NAME: &str = "Zeddius";
 
-pub async fn send_verification_code(
+pub async fn send_verification_link(
     client: &Client,
     config: &Config,
     to_email: &str,
-    code: &str,
+    verify_url: &str,
 ) -> anyhow::Result<()> {
     send(
         client,
         config,
         to_email,
-        "Your Zeddius verification code",
-        &format!("Your verification code is {code}. It expires in 15 minutes."),
+        "Verify your Zeddius email",
+        &format!("Use this link to verify your email: {verify_url}\n\nIt expires in 30 minutes."),
     )
     .await
 }

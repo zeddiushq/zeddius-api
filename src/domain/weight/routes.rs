@@ -11,6 +11,7 @@ use super::model::{CreateWeightLogRequest, WeightLog, WeightLogQuery};
 use super::repo;
 use crate::auth::extractor::VerifiedUser;
 use crate::error::{AppError, ErrorResponse};
+use crate::extract::AppJson;
 use crate::state::AppState;
 
 const DEFAULT_RANGE_DAYS: i64 = 30;
@@ -60,7 +61,7 @@ async fn list(
 async fn create(
     State(state): State<AppState>,
     auth: VerifiedUser,
-    Json(req): Json<CreateWeightLogRequest>,
+    AppJson(req): AppJson<CreateWeightLogRequest>,
 ) -> Result<Json<WeightLog>, AppError> {
     validate(&req)?;
     let log = repo::create(&state.db, auth.user_id, &req).await?;

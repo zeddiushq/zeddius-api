@@ -40,28 +40,37 @@ pub enum AppError {
     #[error("validation failed: {0}")]
     ValidationFailed(String),
 
-    #[error(transparent)]
+    #[error("{message}")]
+    JsonRejection { status: StatusCode, message: String },
+
+    #[error("an unexpected error occurred")]
     Internal(#[from] anyhow::Error),
 }
 
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
-        let (status, code, message) = match &self {
-            AppError::Unauthorized => (StatusCode::UNAUTHORIZED, "UNAUTHORIZED", self.to_string()),
-            AppError::Forbidden => (StatusCode::FORBIDDEN, "FORBIDDEN", self.to_string()),
-            AppError::NotFound(_) => (StatusCode::NOT_FOUND, "NOT_FOUND", self.to_string()),
-            AppError::Conflict(_) => (StatusCode::CONFLICT, "CONFLICT", self.to_string()),
+        let message = self.to_string();
+        let (status, code) = match self {
+            AppError::Unauthorized => (StatusCode::UNAUTHORIZED, "UNAUTHORIZED".to_string()),
+            AppError::Forbidden => (StatusCode::FORBIDDEN, "FORBIDDEN".to_string()),
+            AppError::NotFound(_) => (StatusCode::NOT_FOUND, "NOT_FOUND".to_string()),
+            AppError::Conflict(_) => (StatusCode::CONFLICT, "CONFLICT".to_string()),
             AppError::ValidationFailed(_) => (
                 StatusCode::UNPROCESSABLE_ENTITY,
-                "VALIDATION_FAILED",
-                self.to_string(),
+                "VALIDATION_FAILED".to_string(),
             ),
+            AppError::JsonRejection { status, .. } => {
+                let code = status
+                    .canonical_reason()
+                    .map(|r| r.to_uppercase().replace(" ", "_").replace("\'", ""))
+                    .unwrap_or_else(|| format!("HTTP_{}", status.as_u16()));
+                (status, code)
+            }
             AppError::Internal(e) => {
                 error!(error = %e, "internal server error");
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    "INTERNAL_SERVER_ERROR",
-                    "an unexpected error occurred".to_string(),
+                    "INTERNAL_SERVER_ERROR".to_string(),
                 )
             }
         };
@@ -69,10 +78,7 @@ impl IntoResponse for AppError {
         (
             status,
             Json(ErrorResponse {
-                error: ErrorDetail {
-                    code: code.to_string(),
-                    message,
-                },
+                error: ErrorDetail { code, message },
             }),
         )
             .into_response()

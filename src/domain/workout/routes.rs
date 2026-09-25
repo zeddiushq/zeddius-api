@@ -15,6 +15,7 @@ use super::model::{
 use super::repo;
 use crate::auth::extractor::VerifiedUser;
 use crate::error::{AppError, ErrorResponse};
+use crate::extract::AppJson;
 use crate::state::AppState;
 
 const DEFAULT_RANGE_DAYS: i64 = 30;
@@ -74,7 +75,7 @@ async fn list(
 async fn create(
     State(state): State<AppState>,
     auth: VerifiedUser,
-    Json(req): Json<CreateWorkoutRequest>,
+    AppJson(req): AppJson<CreateWorkoutRequest>,
 ) -> Result<Json<Workout>, AppError> {
     validate_type(&req.r#type)?;
     validate_ended_after_started(req.started_at, req.ended_at)?;
@@ -121,7 +122,7 @@ async fn update(
     State(state): State<AppState>,
     auth: VerifiedUser,
     Path(id): Path<Uuid>,
-    Json(req): Json<UpdateWorkoutRequest>,
+    AppJson(req): AppJson<UpdateWorkoutRequest>,
 ) -> Result<Json<Workout>, AppError> {
     if let Some(ty) = &req.r#type {
         validate_type(ty)?;
@@ -188,7 +189,7 @@ async fn create_lift_sets(
     State(state): State<AppState>,
     auth: VerifiedUser,
     Path(workout_id): Path<Uuid>,
-    Json(req): Json<BulkCreateLiftSetsRequest>,
+    AppJson(req): AppJson<BulkCreateLiftSetsRequest>,
 ) -> Result<Json<Vec<LiftSet>>, AppError> {
     // 404 up front if the workout doesn't exist or isn't the caller's —
     // otherwise a bulk insert against someone else's workout_id would just
@@ -235,7 +236,7 @@ async fn update_lift_set(
     State(state): State<AppState>,
     auth: VerifiedUser,
     Path(id): Path<Uuid>,
-    Json(req): Json<UpdateLiftSetRequest>,
+    AppJson(req): AppJson<UpdateLiftSetRequest>,
 ) -> Result<Json<LiftSet>, AppError> {
     let set = repo::update_lift_set(&state.db, id, auth.user_id, &req).await?;
     set.map(Json).ok_or(AppError::NotFound("lift set"))
@@ -259,7 +260,7 @@ async fn create_run_session(
     State(state): State<AppState>,
     auth: VerifiedUser,
     Path(workout_id): Path<Uuid>,
-    Json(req): Json<CreateRunSessionRequest>,
+    AppJson(req): AppJson<CreateRunSessionRequest>,
 ) -> Result<Json<RunSession>, AppError> {
     if repo::get(&state.db, workout_id, auth.user_id)
         .await?
