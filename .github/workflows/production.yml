@@ -18,6 +18,24 @@ jobs:
       id-token: write
       pull-requests: read
 
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: zeddius
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/zeddius
+
     steps:
       - name: Create GitHub App token
         uses: actions/create-github-app-token@v1
@@ -42,9 +60,15 @@ jobs:
           service_account: ${{ vars.SERVICE_ACCOUNT }}
           registry: us-central1-docker.pkg.dev
 
+      - name: Install sqlx-cli
+        run: cargo install sqlx-cli --no-default-features --features rustls,postgres
+
+      - name: Run migrations (CI database)
+        run: sqlx migrate run
+
       - name: Build and push Docker image
         run: |
-          docker build \
+          docker build --network=host --build-arg DATABASE_URL \
             -t us-central1-docker.pkg.dev/${{ vars.GCP_PROJECT }}/docker/zeddius-api:${{ steps.version.outputs.version }} .
           docker push us-central1-docker.pkg.dev/${{ vars.GCP_PROJECT }}/docker/zeddius-api:${{ steps.version.outputs.version }}
 
@@ -80,6 +104,24 @@ jobs:
       contents: read
       id-token: write
 
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: zeddius
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/zeddius
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -95,8 +137,14 @@ jobs:
           service_account: ${{ vars.SERVICE_ACCOUNT }}
           registry: us-central1-docker.pkg.dev
 
+      - name: Install sqlx-cli
+        run: cargo install sqlx-cli --no-default-features --features rustls,postgres
+
+      - name: Run migrations (CI database)
+        run: sqlx migrate run
+
       - name: Build and push Docker image
         run: |
-          docker build \
+          docker build --network=host --build-arg DATABASE_URL \
             -t us-central1-docker.pkg.dev/${{ vars.GCP_PROJECT }}/docker/zeddius-api:${{ steps.version.outputs.version }} .
           docker push us-central1-docker.pkg.dev/${{ vars.GCP_PROJECT }}/docker/zeddius-api:${{ steps.version.outputs.version }}

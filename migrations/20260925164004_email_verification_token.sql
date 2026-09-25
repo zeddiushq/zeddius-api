@@ -1,0 +1,4 @@
+ALTER TABLE users DROP COLUMN email_verification_attempts;
+
+ALTER TABLE users RENAME COLUMN email_verification_code_hash TO email_verification_token_hash;
+ALTER TABLE users RENAME COLUMN email_verification_code_expires_at TO email_verification_token_expires_at;

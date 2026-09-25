@@ -12,6 +12,7 @@ use super::model::{
 use super::repo;
 use crate::auth::extractor::VerifiedUser;
 use crate::error::{AppError, ErrorResponse};
+use crate::extract::AppJson;
 use crate::state::AppState;
 
 // Split by HTTP method: `routes!` panics at runtime ("Overlapping method
@@ -61,7 +62,7 @@ async fn list(
 async fn create(
     State(state): State<AppState>,
     auth: VerifiedUser,
-    Json(req): Json<CreateTaskRequest>,
+    AppJson(req): AppJson<CreateTaskRequest>,
 ) -> Result<Json<DailyTask>, AppError> {
     validate_recurrence(&req.recurrence)?;
     validate_target_count(&req.recurrence, req.target_count_per_week)?;
@@ -87,7 +88,7 @@ async fn update(
     State(state): State<AppState>,
     auth: VerifiedUser,
     Path(id): Path<Uuid>,
-    Json(req): Json<UpdateTaskRequest>,
+    AppJson(req): AppJson<UpdateTaskRequest>,
 ) -> Result<Json<DailyTask>, AppError> {
     // recurrence and target_count_per_week must stay consistent as a pair,
     // so a PATCH touching only one of them is validated against the
@@ -172,7 +173,7 @@ async fn complete(
     State(state): State<AppState>,
     auth: VerifiedUser,
     Path(id): Path<Uuid>,
-    Json(req): Json<CompleteTaskRequest>,
+    AppJson(req): AppJson<CompleteTaskRequest>,
 ) -> Result<StatusCode, AppError> {
     if repo::get(&state.db, id, auth.user_id).await?.is_none() {
         return Err(AppError::NotFound("task"));

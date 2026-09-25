@@ -13,6 +13,7 @@ use super::model::{
 use super::repo;
 use crate::auth::extractor::VerifiedUser;
 use crate::error::{AppError, ErrorResponse};
+use crate::extract::AppJson;
 use crate::state::AppState;
 
 const DEFAULT_RANGE_DAYS: i64 = 30;
@@ -62,7 +63,7 @@ async fn list(
 async fn create(
     State(state): State<AppState>,
     auth: VerifiedUser,
-    Json(req): Json<CreateFoodEntryRequest>,
+    AppJson(req): AppJson<CreateFoodEntryRequest>,
 ) -> Result<Json<FoodEntry>, AppError> {
     if req.name.trim().is_empty() {
         return Err(AppError::ValidationFailed("name must not be empty".into()));
@@ -97,7 +98,7 @@ async fn update(
     State(state): State<AppState>,
     auth: VerifiedUser,
     Path(id): Path<Uuid>,
-    Json(req): Json<UpdateFoodEntryRequest>,
+    AppJson(req): AppJson<UpdateFoodEntryRequest>,
 ) -> Result<Json<FoodEntry>, AppError> {
     if req
         .name

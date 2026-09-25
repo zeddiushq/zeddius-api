@@ -2,11 +2,10 @@ FROM rust:1-slim-bookworm AS build
 WORKDIR /app
 
 COPY Cargo.toml Cargo.lock ./
-COPY .sqlx .sqlx
 COPY migrations migrations
 COPY src src
 
-ENV SQLX_OFFLINE=true
+ARG DATABASE_URL
 RUN cargo build --release
 
 FROM debian:bookworm-slim AS runtime

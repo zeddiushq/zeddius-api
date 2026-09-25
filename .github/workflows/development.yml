@@ -18,6 +18,24 @@ jobs:
       contents: read
       id-token: write
 
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: zeddius
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/zeddius
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -37,6 +55,12 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
 
+      - name: Install sqlx-cli
+        run: cargo install sqlx-cli --no-default-features --features rustls,postgres
+
+      - name: Run migrations (CI database)
+        run: sqlx migrate run
+
       - name: Check formatting
         run: cargo fmt --check
 
@@ -48,16 +72,14 @@ jobs:
 
       - name: Build and push Docker image
         run: |
-          docker build \
+          docker build --network=host --build-arg DATABASE_URL \
             -t us-central1-docker.pkg.dev/${{ vars.GCP_PROJECT }}/docker/zeddius-api:${{ github.sha }} .
           docker push us-central1-docker.pkg.dev/${{ vars.GCP_PROJECT }}/docker/zeddius-api:${{ github.sha }}
 
-      - name: Run migrations
+      - name: Run migrations (dev database)
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-        run: |
-          cargo install sqlx-cli --no-default-features --features rustls,postgres
-          sqlx migrate run
+        run: sqlx migrate run
 
       - name: Deploy to Cloud Run
         run: |

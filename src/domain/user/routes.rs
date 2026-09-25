@@ -7,6 +7,7 @@ use super::model::{UpdateUserRequest, UserResponse};
 use super::repo;
 use crate::auth::extractor::VerifiedUser;
 use crate::error::{AppError, ErrorResponse};
+use crate::extract::AppJson;
 use crate::state::AppState;
 
 pub fn router() -> OpenApiRouter<AppState> {
@@ -55,7 +56,7 @@ async fn me(
 async fn update(
     State(state): State<AppState>,
     auth: VerifiedUser,
-    Json(req): Json<UpdateUserRequest>,
+    AppJson(req): AppJson<UpdateUserRequest>,
 ) -> Result<Json<UserResponse>, AppError> {
     if req.target_calories.is_some_and(|v| v <= 0) {
         return Err(AppError::ValidationFailed(
