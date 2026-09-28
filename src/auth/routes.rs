@@ -21,9 +21,9 @@ use super::extractor::AuthUser;
 use super::service;
 use super::tokens;
 use crate::domain::user::model::{
-    AppleAuthRequest, AppleCompleteRequest, AppleLinkRequest, AuthResponse, ForgotPasswordRequest,
-    LoginRequest, RefreshRequest, RegisterRequest, ResetPasswordRequest, Session,
-    UsernameAvailableResponse, VerifyEmailRequest,
+    AppleAuthRequest, AppleCompleteRequest, AuthResponse, ForgotPasswordRequest, LoginRequest,
+    RefreshRequest, RegisterRequest, ResetPasswordRequest, Session, UsernameAvailableResponse,
+    VerifyEmailRequest,
 };
 use crate::domain::user::repo;
 use crate::error::{AppError, ErrorResponse};
@@ -170,7 +170,6 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(resend_verification))
         .routes(routes!(oauth_apple))
         .routes(routes!(oauth_apple_complete))
-        .routes(routes!(oauth_apple_link))
         .routes(routes!(username_available))
         .layer(GovernorLayer::new(governor_conf))
 }
@@ -180,7 +179,7 @@ pub fn router() -> OpenApiRouter<AppState> {
     path = "/auth/register",
     request_body = RegisterRequest,
     responses(
-        (status = 201, description = "Account created (unverified — a verification code was emailed)", body = AuthResponse),
+        (status = 201, description = "Account created (unverified — a verification link was emailed)", body = AuthResponse),
         (status = 409, description = "Email already registered to a verified account, or username taken", body = ErrorResponse),
         (status = 422, description = "Missing fields, invalid email, password not 8-128 characters, or username reserved", body = ErrorResponse),
     ),
@@ -227,21 +226,23 @@ async fn register(
     }
 
     let normalized_email = normalize_email(&body.email);
+    let password_hash = service::hash_password(&body.password)?;
 
-    // Unverified duplicates under the same email are allowed to coexist,
-    // so that no one can squat an email address. Verified duplicates are
-    // not allowed.
-    if repo::find_verified_by_email(&state.db, &normalized_email)
+    let mut tx = state.db.begin().await?;
+
+    repo::lock_email(&mut *tx, &normalized_email).await?;
+
+    // unverified duplicates are allowed to coexist, so that no one can squat an
+    // email address, but never once a verified owner exists.
+    if repo::find_verified_by_email(&mut *tx, &normalized_email)
         .await?
         .is_some()
     {
         return Err(AppError::Conflict("email already registered"));
     }
 
-    let password_hash = service::hash_password(&body.password)?;
-
     let user = repo::create(
-        &state.db,
+        &mut *tx,
         &normalized_email,
         &body.username,
         &body.display_name,
@@ -254,6 +255,8 @@ async fn register(
         }
         _ => AppError::from(e),
     })?;
+
+    tx.commit().await?;
 
     issue_verification_link(&state, user.id, &user.email).await?;
 
@@ -531,15 +534,16 @@ async fn resend_verification(
     Ok(StatusCode::NO_CONTENT)
 }
 
+// For existing users. If the original sign in method was not Apple,
+// we link it if both sides have verified the email.
 #[utoipa::path(
     post,
     path = "/auth/oauth/apple",
     request_body = AppleAuthRequest,
     responses(
-        (status = 200, description = "Identity already linked to a known user", body = AuthResponse),
+        (status = 200, description = "Identity already linked to a known user, or newly linked to an existing verified account with the same email", body = AuthResponse),
         (status = 204, description = "No account exists yet — client should call /auth/oauth/apple/complete"),
         (status = 401, description = "The identity token itself doesn't verify (bad signature, claims, or missing email)", body = ErrorResponse),
-        (status = 409, description = "The email matches an existing account that has a password — prove it via /auth/oauth/apple/link", body = ErrorResponse),
     ),
     tag = "auth",
 )]
@@ -550,6 +554,7 @@ async fn oauth_apple(
 ) -> Result<Response, AppError> {
     let (claims, email) = verify_apple_identity_with_email(&state, &body.identity_token).await?;
 
+    // Idempotency
     if let Some(user) = repo::find_by_oauth(&state.db, "apple", &claims.sub).await? {
         return Ok(Json(
             tokens::issue_token_pair_and_build_auth_response(
@@ -563,59 +568,47 @@ async fn oauth_apple(
     }
 
     // No oauth_accounts row for this sub yet. If the email matches an
-    // existing *verified* user, resolve based on how that account was
-    // established. Scoped to the verified owner only — an unrelated,
-    // never-verified row squatting on this same email must never be able to
-    // trigger a 409 or influence auto-linking; it isn't a real conflict.
-    let Some(user) = repo::find_verified_by_email(&state.db, &email).await? else {
-        return Ok(StatusCode::NO_CONTENT.into_response());
+    // existing verified user, link this identity to it, unless the incoming
+    // identity token claims email_verified is false.
+    let user = match repo::find_verified_by_email(&state.db, &email).await? {
+        Some(user) if claims.email_verified => user,
+        _ => return Ok(StatusCode::NO_CONTENT.into_response()),
     };
 
-    if user.password_hash.is_some() {
-        // Only a self-typed password backs this account — a matching
-        // email claim alone doesn't prove the caller controls it.
-        return Err(AppError::Conflict(
-            "an account with this email already exists",
-        ));
-    }
+    let user =
+        match repo::link_oauth_account(&state.db, user.id, "apple", &claims.sub, &email).await {
+            Ok(()) => user,
+            // Lost a race with another call linking this same identity (e.g. a
+            // retried request) — that call's row already exists, so this is the
+            // same idempotent case as the check above, just caught a few
+            // milliseconds later: log in, don't treat it as an error.
+            Err(sqlx::Error::Database(db_err))
+                if db_err.constraint() == Some("oauth_accounts_provider_provider_user_id_key") =>
+            {
+                repo::find_by_oauth(&state.db, "apple", &claims.sub)
+                    .await?
+                    .ok_or_else(|| {
+                        AppError::Internal(anyhow::anyhow!(
+                            "oauth identity race resolved but no row found for sub {}",
+                            claims.sub
+                        ))
+                    })?
+            }
+            Err(e) => return Err(AppError::from(e)),
+        };
 
-    // Only a provider-verified email can grant access to an existing
-    // account with no independent proof (no password to fall back on).
-    // An unverified claim is treated as if no match were found at all —
-    // not an error, just not enough to trust here.
-    if !claims.email_verified {
-        return Ok(StatusCode::NO_CONTENT.into_response());
-    }
-
-    if repo::has_oauth_email(&state.db, user.id, &user.email).await? {
-        repo::link_oauth_account(&state.db, user.id, "apple", &claims.sub, &email).await?;
-        return Ok(Json(
-            tokens::issue_token_pair_and_build_auth_response(
-                &state,
-                user,
-                tokens::user_agent(&headers),
-            )
-            .await?,
+    Ok(Json(
+        tokens::issue_token_pair_and_build_auth_response(
+            &state,
+            user,
+            tokens::user_agent(&headers),
         )
-        .into_response());
-    }
-
-    // An account matching this shape (passwordless + verified) should
-    // always have a corresponding oauth_accounts row from whichever
-    // provider created/verified it — reaching here means that invariant
-    // was somehow violated. Refuse to auto-link rather than trust it.
-    error!(
-        user_id = %user.id,
-        "passwordless user has no matching oauth_accounts row — refusing to auto-link"
-    );
-    Ok(StatusCode::NO_CONTENT.into_response())
+        .await?,
+    )
+    .into_response())
 }
 
-// Finishes an Apple sign-in that returned 204: creates the user record and
-// links the oauth_accounts row. Authenticated by the identity token itself
-// (re-verified here), not a Bearer access token — none exists yet, since no
-// user record exists yet. `register` never calls this; it creates its row
-// directly in one step.
+// Finishes an Apple sign-in that returned 204
 #[utoipa::path(
     post,
     path = "/auth/oauth/apple/complete",
@@ -628,6 +621,7 @@ async fn oauth_apple(
         (status = 422, description = "Missing username/display_name, or username reserved", body = ErrorResponse),
     ),
     tag = "auth",
+    description = "Used for account creation through Apple OAuth. Use this endpoint when a user does not exist yet.",
 )]
 async fn oauth_apple_complete(
     State(state): State<AppState>,
@@ -636,8 +630,7 @@ async fn oauth_apple_complete(
 ) -> Result<(StatusCode, Json<AuthResponse>), AppError> {
     let (claims, email) = verify_apple_identity_with_email(&state, &body.identity_token).await?;
 
-    // Idempotency: a retried/duplicate completion call for an identity that's
-    // already linked logs the user in instead of trying to recreate them.
+    // Idempotency
     if let Some(user) = repo::find_by_oauth(&state.db, "apple", &claims.sub).await? {
         let response = tokens::issue_token_pair_and_build_auth_response(
             &state,
@@ -666,8 +659,23 @@ async fn oauth_apple_complete(
     // and needs our own code before it can win a contested email.
     let email_verified_at = claims.email_verified.then(Utc::now);
 
-    let user = repo::create_with_oauth(
-        &state.db,
+    let mut tx = state.db.begin().await?;
+
+    repo::lock_email(&mut *tx, &email).await?;
+
+    // Only the unverified path needs this check — an insert that's already
+    // verified collides atomically with `users_email_verified_unique` if
+    // another verified row exists.
+    if email_verified_at.is_none()
+        && repo::find_verified_by_email(&mut *tx, &email)
+            .await?
+            .is_some()
+    {
+        return Err(AppError::Conflict("email already registered"));
+    }
+
+    let user = match repo::create_with_oauth(
+        &mut tx,
         &email,
         &body.username,
         &body.display_name,
@@ -676,17 +684,40 @@ async fn oauth_apple_complete(
         email_verified_at,
     )
     .await
-    .map_err(|e| match &e {
-        sqlx::Error::Database(db_err)
+    {
+        Ok(user) => user,
+        // Lost a race condition with another request
+        Err(sqlx::Error::Database(db_err))
+            if db_err.constraint() == Some("oauth_accounts_provider_provider_user_id_key") =>
+        {
+            let user = repo::find_by_oauth(&state.db, "apple", &claims.sub)
+                .await?
+                .ok_or_else(|| {
+                    AppError::Internal(anyhow::anyhow!(
+                        "oauth identity race resolved but no row found for sub {}",
+                        claims.sub
+                    ))
+                })?;
+            let response = tokens::issue_token_pair_and_build_auth_response(
+                &state,
+                user,
+                tokens::user_agent(&headers),
+            )
+            .await?;
+            return Ok((StatusCode::OK, Json(response)));
+        }
+        Err(sqlx::Error::Database(db_err))
             if db_err.constraint() == Some("users_email_verified_unique") =>
         {
-            AppError::Conflict("email already registered")
+            return Err(AppError::Conflict("email already registered"));
         }
-        sqlx::Error::Database(db_err) if db_err.constraint() == Some("users_username_key") => {
-            AppError::Conflict("username already taken")
+        Err(sqlx::Error::Database(db_err)) if db_err.constraint() == Some("users_username_key") => {
+            return Err(AppError::Conflict("username already taken"));
         }
-        _ => AppError::from(e),
-    })?;
+        Err(e) => return Err(AppError::from(e)),
+    };
+
+    tx.commit().await?;
 
     if email_verified_at.is_none() {
         issue_verification_link(&state, user.id, &user.email).await?;
@@ -700,72 +731,6 @@ async fn oauth_apple_complete(
     .await?;
 
     Ok((StatusCode::CREATED, Json(response)))
-}
-
-// Resolves a 409 from /auth/oauth/apple: proves the caller controls the
-// existing password-holding account before linking this Apple identity to it.
-#[utoipa::path(
-    post,
-    path = "/auth/oauth/apple/link",
-    request_body = AppleLinkRequest,
-    responses(
-        (status = 200, description = "Password verified; Apple identity linked to the existing account (or was already linked)", body = AuthResponse),
-        (status = 401, description = "The identity token doesn't verify, or the password is wrong", body = ErrorResponse),
-    ),
-    tag = "auth",
-)]
-async fn oauth_apple_link(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    AppJson(body): AppJson<AppleLinkRequest>,
-) -> Result<Json<AuthResponse>, AppError> {
-    let (claims, email) = verify_apple_identity_with_email(&state, &body.identity_token).await?;
-
-    // Same reasoning as login: rejected identically to a wrong password, and
-    // bails before ever calling Argon2.
-    if body.password.len() < MIN_PASSWORD_LEN || body.password.len() > MAX_PASSWORD_LEN {
-        return Err(AppError::Unauthorized);
-    }
-
-    // Idempotency: a retried link call for an identity that's already linked
-    // just logs the user in instead of re-checking the password.
-    if let Some(user) = repo::find_by_oauth(&state.db, "apple", &claims.sub).await? {
-        return Ok(Json(
-            tokens::issue_token_pair_and_build_auth_response(
-                &state,
-                user,
-                tokens::user_agent(&headers),
-            )
-            .await?,
-        ));
-    }
-
-    // Scoped to the verified owner, same reasoning as oauth_apple's fallback
-    // match — this is resolving that endpoint's 409, which is only ever
-    // raised against a verified account, so this lookup should agree.
-    let user = repo::find_verified_by_email(&state.db, &email)
-        .await?
-        .ok_or(AppError::Unauthorized)?;
-
-    let hash = user
-        .password_hash
-        .as_deref()
-        .ok_or(AppError::Unauthorized)?;
-
-    if !service::verify_password(&body.password, hash)? {
-        return Err(AppError::Unauthorized);
-    }
-
-    repo::link_oauth_account(&state.db, user.id, "apple", &claims.sub, &email).await?;
-
-    Ok(Json(
-        tokens::issue_token_pair_and_build_auth_response(
-            &state,
-            user,
-            tokens::user_agent(&headers),
-        )
-        .await?,
-    ))
 }
 
 #[utoipa::path(
@@ -818,8 +783,6 @@ fn normalize_email(email: &str) -> String {
     email.trim().to_lowercase()
 }
 
-// Checks basic shape only — local part, @, a dot in the domain. Not a
-// substitute for actually confirming the address is reachable.
 fn is_valid_email(email: &str) -> bool {
     let mut parts = email.splitn(2, '@');
     let local = parts.next().unwrap_or("");
@@ -848,11 +811,6 @@ async fn issue_verification_link(
     Ok(())
 }
 
-// Generates a full-entropy token (not a short code — this is clicked from a
-// link, never manually typed back), stores its hash, and emails a reset
-// link. Same log-and-swallow behavior on a Resend failure as verification
-// codes: the token is already stored, so a repeat /auth/forgot-password
-// call recovers from a failed send.
 async fn issue_password_reset_token(
     state: &AppState,
     user_id: Uuid,

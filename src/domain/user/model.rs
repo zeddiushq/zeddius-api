@@ -156,12 +156,6 @@ pub struct AppleCompleteRequest {
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
-pub struct AppleLinkRequest {
-    pub identity_token: String,
-    pub password: String,
-}
-
-#[derive(Debug, Deserialize, ToSchema)]
 pub struct VerifyEmailRequest {
     pub token: String,
 }

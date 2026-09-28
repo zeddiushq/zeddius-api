@@ -1,11 +1,9 @@
 use chrono::{DateTime, Utc};
-use sqlx::PgPool;
+use sqlx::{PgConnection, PgPool};
 use uuid::Uuid;
 
 use super::model::{Session, UpdateUserRequest, User};
 
-// Joins to `users` so the extractor can check email_verified_at on every
-// authenticated request without a second round trip.
 pub async fn find_auth_context_by_access_token(
     db: &PgPool,
     token_hash: &str,
@@ -62,23 +60,16 @@ pub async fn update(
     .await
 }
 
-// Multiple unverified rows can share an email (only verified rows are
-// unique), so this can return more than one candidate. Used by login, which
-// must still work pre-verification and so can't narrow to the verified row
-// alone — callers check the password against each candidate instead of
-// trusting a single arbitrarily-chosen match.
 pub async fn find_all_by_email(db: &PgPool, email: &str) -> Result<Vec<User>, sqlx::Error> {
     sqlx::query_as!(User, "SELECT * FROM users WHERE email = $1", email)
         .fetch_all(db)
         .await
 }
 
-// The single verified owner of an email, if one exists — safe to treat as
-// unambiguous since verified rows are unique per email by construction
-// (users_email_verified_unique). Use this, never find_all_by_email, wherever
-// a lookup should only ever see a real, confirmed owner and must ignore any
-// unrelated unverified rows squatting on the same email.
-pub async fn find_verified_by_email(db: &PgPool, email: &str) -> Result<Option<User>, sqlx::Error> {
+pub async fn find_verified_by_email(
+    db: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
+    email: &str,
+) -> Result<Option<User>, sqlx::Error> {
     sqlx::query_as!(
         User,
         "SELECT * FROM users WHERE email = $1 AND email_verified_at IS NOT NULL",
@@ -86,6 +77,16 @@ pub async fn find_verified_by_email(db: &PgPool, email: &str) -> Result<Option<U
     )
     .fetch_optional(db)
     .await
+}
+
+pub async fn lock_email(
+    db: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
+    email: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query!("SELECT pg_advisory_xact_lock(hashtext($1)::bigint)", email)
+        .execute(db)
+        .await?;
+    Ok(())
 }
 
 pub async fn find_by_oauth(
@@ -106,9 +107,6 @@ pub async fn find_by_oauth(
     .await
 }
 
-// Links an already-existing user to a new OAuth identity. Only ever called
-// with an email that came from the provider's own verified claim, never one
-// supplied by the client.
 pub async fn link_oauth_account(
     db: &PgPool,
     user_id: Uuid,
@@ -127,26 +125,6 @@ pub async fn link_oauth_account(
     .execute(db)
     .await?;
     Ok(())
-}
-
-// True if some prior OAuth link recorded this exact email for this user.
-// Says nothing about whether that user's email is currently verified — this
-// only checks oauth_accounts existence. Callers relying on this to gate
-// auto-linking must independently ensure `user_id` refers to a verified row
-// (e.g. via find_verified_by_email) before calling; an unverified account's
-// oauth_accounts row must never count as grounds to auto-link a different,
-// newly-arriving identity onto it, but that precondition is the caller's
-// responsibility, not something this function checks.
-pub async fn has_oauth_email(db: &PgPool, user_id: Uuid, email: &str) -> Result<bool, sqlx::Error> {
-    sqlx::query_scalar!(
-        r#"SELECT EXISTS(
-               SELECT 1 FROM oauth_accounts WHERE user_id = $1 AND email = $2
-           ) as "exists!""#,
-        user_id,
-        email,
-    )
-    .fetch_one(db)
-    .await
 }
 
 pub async fn username_exists(db: &PgPool, username: &str) -> Result<bool, sqlx::Error> {
@@ -177,7 +155,7 @@ pub async fn find_by_refresh_token(
 }
 
 pub async fn create(
-    db: &PgPool,
+    db: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     email: &str,
     username: &str,
     display_name: &str,
@@ -197,14 +175,8 @@ pub async fn create(
     .await
 }
 
-// Creates a new user and links it to an OAuth identity atomically — the two
-// inserts must succeed together, or the user would exist with no way to ever
-// be found by that identity again on a future sign-in. `email_verified_at`
-// is set immediately only when the provider's own claim already asserted the
-// email was verified; otherwise the row is created unverified, same as a
-// password registration, and needs our own code verification.
 pub async fn create_with_oauth(
-    db: &PgPool,
+    db: &mut PgConnection,
     email: &str,
     username: &str,
     display_name: &str,
@@ -212,8 +184,6 @@ pub async fn create_with_oauth(
     provider_user_id: &str,
     email_verified_at: Option<DateTime<Utc>>,
 ) -> Result<User, sqlx::Error> {
-    let mut tx = db.begin().await?;
-
     let user = sqlx::query_as!(
         User,
         "INSERT INTO users (email, username, display_name, email_verified_at)
@@ -224,7 +194,7 @@ pub async fn create_with_oauth(
         display_name,
         email_verified_at,
     )
-    .fetch_one(&mut *tx)
+    .fetch_one(&mut *db)
     .await?;
 
     sqlx::query!(
@@ -235,10 +205,9 @@ pub async fn create_with_oauth(
         provider_user_id,
         email,
     )
-    .execute(&mut *tx)
+    .execute(&mut *db)
     .await?;
 
-    tx.commit().await?;
     Ok(user)
 }
 
@@ -271,7 +240,6 @@ pub async fn insert_token_pair(
     Ok(())
 }
 
-// Revokes an access token and its paired refresh token. Used by logout.
 pub async fn revoke_token_pair_by_access_hash(
     db: &PgPool,
     access_token_hash: &str,
@@ -291,7 +259,6 @@ pub async fn revoke_token_pair_by_access_hash(
     Ok(())
 }
 
-// Revokes a refresh token and its paired access token. Used by the refresh flow.
 pub async fn revoke_token_pair_by_refresh_hash(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     refresh_token_hash: &str,
@@ -331,9 +298,6 @@ pub async fn list_active_sessions(
     .await
 }
 
-// Revokes every session for `user_id` except the one whose access token
-// matches `current_access_token_hash` — "log out all other devices," not a
-// full logout of the caller too.
 pub async fn revoke_other_sessions(
     db: &PgPool,
     user_id: Uuid,
@@ -375,8 +339,6 @@ pub async fn set_verification_token(
     Ok(())
 }
 
-// Unauthenticated lookup, same shape as find_by_password_reset_token — the
-// token alone identifies the row and proves ownership of its email.
 pub async fn find_by_verification_token(
     db: &PgPool,
     token_hash: &str,
@@ -392,8 +354,6 @@ pub async fn find_by_verification_token(
     .await
 }
 
-// Promotes an unverified row to verified in place — used when no other row
-// already holds this email as verified.
 pub async fn mark_email_verified(db: &PgPool, user_id: Uuid) -> Result<User, sqlx::Error> {
     sqlx::query_as!(
         User,
@@ -409,8 +369,6 @@ pub async fn mark_email_verified(db: &PgPool, user_id: Uuid) -> Result<User, sql
     .await
 }
 
-// A different row already holding this email as verified — the target of a
-// merge, if one exists, when `user_id` proves ownership of `email`.
 pub async fn find_verified_by_email_excluding(
     db: &PgPool,
     email: &str,
@@ -426,13 +384,6 @@ pub async fn find_verified_by_email_excluding(
     .await
 }
 
-// Called when a hollow (unverified) row proves ownership of an email that a
-// different, already-verified row already holds. A hollow row can never have
-// accumulated real data — nothing can be done with it pre-verification — so
-// there's nothing to reconcile beyond credentials: move its oauth_accounts
-// links onto the verified row, backfill a password onto the verified row
-// only if it doesn't already have one, then discard the hollow row (its
-// tokens cascade-delete with it).
 pub async fn merge_hollow_into_verified(
     db: &PgPool,
     hollow_user_id: Uuid,
@@ -485,10 +436,6 @@ pub async fn set_password_reset_token(
     Ok(())
 }
 
-// Reverse lookup by token hash — no email needed, since the token alone
-// unambiguously identifies the row. Unlike find_by_refresh_token, the only
-// caller ever needs the id, so this returns just that rather than
-// constructing a full User for a row whose other fields go unused.
 pub async fn find_by_password_reset_token(
     db: &PgPool,
     token_hash: &str,
@@ -503,8 +450,6 @@ pub async fn find_by_password_reset_token(
     .await
 }
 
-// Sets a new password and burns the reset token — single-use, since a
-// replayed request with the same token no longer matches once this clears it.
 pub async fn reset_password(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     user_id: Uuid,
@@ -524,14 +469,6 @@ pub async fn reset_password(
     Ok(())
 }
 
-// Revokes every session for `user_id` unconditionally — unlike
-// revoke_other_sessions, there's no "current" session to exempt here, since
-// the caller isn't authenticated at all during a password reset. Deliberate:
-// a reset should kick out anyone holding the old password, which is often
-// exactly the scenario being recovered from. Takes a generic executor so the
-// caller can run it in the same transaction as reset_password — if
-// revocation failed silently after the password change already committed,
-// an old session would survive exactly the reset meant to kill it.
 pub async fn revoke_all_sessions(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     user_id: Uuid,
