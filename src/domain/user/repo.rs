@@ -369,51 +369,28 @@ pub async fn mark_email_verified(db: &PgPool, user_id: Uuid) -> Result<User, sql
     .await
 }
 
-pub async fn find_verified_by_email_excluding(
+pub async fn delete_unverified_user(db: &PgPool, user_id: Uuid) -> Result<(), sqlx::Error> {
+    sqlx::query!(
+        "DELETE FROM users WHERE id = $1 AND email_verified_at IS NULL",
+        user_id,
+    )
+    .execute(db)
+    .await?;
+    Ok(())
+}
+
+pub async fn delete_other_unverified_by_email(
     db: &PgPool,
     email: &str,
     exclude_user_id: Uuid,
-) -> Result<Option<User>, sqlx::Error> {
-    sqlx::query_as!(
-        User,
-        "SELECT * FROM users WHERE email = $1 AND email_verified_at IS NOT NULL AND id != $2",
+) -> Result<(), sqlx::Error> {
+    sqlx::query!(
+        "DELETE FROM users WHERE email = $1 AND email_verified_at IS NULL AND id != $2",
         email,
         exclude_user_id,
     )
-    .fetch_optional(db)
-    .await
-}
-
-pub async fn merge_hollow_into_verified(
-    db: &PgPool,
-    hollow_user_id: Uuid,
-    target_user_id: Uuid,
-) -> Result<(), sqlx::Error> {
-    let mut tx = db.begin().await?;
-
-    sqlx::query!(
-        "UPDATE oauth_accounts SET user_id = $1 WHERE user_id = $2",
-        target_user_id,
-        hollow_user_id,
-    )
-    .execute(&mut *tx)
+    .execute(db)
     .await?;
-
-    sqlx::query!(
-        "UPDATE users
-         SET password_hash = (SELECT password_hash FROM users WHERE id = $2)
-         WHERE id = $1 AND password_hash IS NULL",
-        target_user_id,
-        hollow_user_id,
-    )
-    .execute(&mut *tx)
-    .await?;
-
-    sqlx::query!("DELETE FROM users WHERE id = $1", hollow_user_id)
-        .execute(&mut *tx)
-        .await?;
-
-    tx.commit().await?;
     Ok(())
 }
 

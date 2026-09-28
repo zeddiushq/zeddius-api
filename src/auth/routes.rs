@@ -481,8 +481,9 @@ async fn revoke_sessions(
     path = "/auth/verify-email",
     request_body = VerifyEmailRequest,
     responses(
-        (status = 204, description = "Email verified. Merges into an existing verified account under the same email if one exists."),
+        (status = 204, description = "Email verified"),
         (status = 401, description = "Token invalid or expired", body = ErrorResponse),
+        (status = 409, description = "Email already registered to a different, already-verified account — this row was deleted", body = ErrorResponse),
     ),
     tag = "auth",
 )]
@@ -495,15 +496,20 @@ async fn verify_email(
         .await?
         .ok_or(AppError::Unauthorized)?;
 
-    if let Some(existing) =
-        repo::find_verified_by_email_excluding(&state.db, &user.email, user.id).await?
-    {
-        repo::merge_hollow_into_verified(&state.db, user.id, existing.id).await?;
-    } else {
-        repo::mark_email_verified(&state.db, user.id).await?;
+    match repo::mark_email_verified(&state.db, user.id).await {
+        Ok(_) => {
+            repo::delete_other_unverified_by_email(&state.db, &user.email, user.id).await?;
+            Ok(StatusCode::NO_CONTENT)
+        }
+        // Lost a race condition with another request that verified this same email
+        Err(sqlx::Error::Database(db_err))
+            if db_err.constraint() == Some("users_email_verified_unique") =>
+        {
+            repo::delete_unverified_user(&state.db, user.id).await?;
+            Err(AppError::Conflict("email already registered"))
+        }
+        Err(e) => Err(AppError::from(e)),
     }
-
-    Ok(StatusCode::NO_CONTENT)
 }
 
 #[utoipa::path(
@@ -721,6 +727,8 @@ async fn oauth_apple_complete(
 
     if email_verified_at.is_none() {
         issue_verification_link(&state, user.id, &user.email).await?;
+    } else {
+        repo::delete_other_unverified_by_email(&state.db, &user.email, user.id).await?;
     }
 
     let response = tokens::issue_token_pair_and_build_auth_response(
