@@ -590,7 +590,19 @@ async fn oauth_apple(
 
     let user =
         match repo::link_oauth_account(&state.db, user.id, "apple", &claims.sub, &email).await {
-            Ok(()) => user,
+            Ok(()) => {
+                if let Err(e) = email::send_oauth_linked_notice(
+                    &state.http_client,
+                    &state.config,
+                    &user.email,
+                    "Apple",
+                )
+                .await
+                {
+                    error!(error = %e, user_id = %user.id, "failed to send oauth-linked notice");
+                }
+                user
+            }
             // Lost a race with another call linking this same identity (e.g. a
             // retried request) — that call's row already exists, so this is the
             // same idempotent case as the check above, just caught a few
