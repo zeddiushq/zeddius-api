@@ -41,6 +41,24 @@ pub async fn send_password_reset_link(
     .await
 }
 
+pub async fn send_oauth_linked_notice(
+    client: &Client,
+    config: &Config,
+    to_email: &str,
+    provider_label: &str,
+) -> anyhow::Result<()> {
+    send(
+        client,
+        config,
+        to_email,
+        "New sign-in method added to your Zeddius account",
+        &format!(
+            "{provider_label} was just linked to your Zeddius account as a sign-in method. If this wasn't you, please contact support immediately."
+        ),
+    )
+    .await
+}
+
 // Plain HTTP call against Resend's REST API — no dedicated SDK. Failure here
 // is logged by the caller and does not fail the request that triggered it;
 // whatever token/code prompted the email is already stored, so a resend
