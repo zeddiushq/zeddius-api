@@ -50,7 +50,17 @@ pub async fn issue_token_pair(
         refresh_expires,
         user_agent,
     )
-    .await?;
+    .await
+    .map_err(|e| match &e {
+        // In case the user row was deleted between being looked up and being
+        // issued tokens here.
+        sqlx::Error::Database(db_err)
+            if db_err.constraint() == Some("access_tokens_user_id_fkey") =>
+        {
+            AppError::Unauthorized
+        }
+        _ => AppError::from(e),
+    })?;
 
     Ok((access_token, refresh_token))
 }
