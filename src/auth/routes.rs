@@ -35,6 +35,14 @@ const PASSWORD_RESET_TOKEN_TTL_MINS: i64 = 30;
 // Bounds Argon2's cost, which scales with input size.
 const MAX_PASSWORD_LEN: usize = 128;
 const MIN_PASSWORD_LEN: usize = 8;
+const MIN_USERNAME_LEN: usize = 3;
+const MAX_USERNAME_LEN: usize = 30;
+const MAX_DISPLAY_NAME_LEN: usize = 50;
+
+const MSG_EMAIL_ALREADY_REGISTERED: &str = "email already registered";
+const MSG_USERNAME_ALREADY_TAKEN: &str = "username already taken";
+const MSG_USERNAME_RESERVED: &str = "username is reserved";
+const MSG_INVALID_EMAIL: &str = "invalid email address";
 const RESERVED_USERNAMES: &[&str] = &[
     // brand
     "zed",
@@ -181,7 +189,7 @@ pub fn router() -> OpenApiRouter<AppState> {
     responses(
         (status = 201, description = "Account created (unverified — a verification link was emailed)", body = AuthResponse),
         (status = 409, description = "Email already registered to a verified account, or username taken", body = ErrorResponse),
-        (status = 422, description = "Missing fields, invalid email, password not 8-128 characters, or username reserved", body = ErrorResponse),
+        (status = 422, description = "Missing fields, invalid email, password not 8-128 characters, username invalid/reserved, or display name too long", body = ErrorResponse),
     ),
     tag = "auth",
 )]
@@ -201,28 +209,31 @@ async fn register(
     }
 
     if !is_valid_email(&body.email) {
-        return Err(AppError::ValidationFailed(
-            "invalid email address".to_string(),
-        ));
+        return Err(AppError::ValidationFailed(MSG_INVALID_EMAIL.to_string()));
     }
 
     if body.password.len() < MIN_PASSWORD_LEN {
-        return Err(AppError::ValidationFailed(format!(
-            "password must be at least {MIN_PASSWORD_LEN} characters"
-        )));
+        return Err(AppError::ValidationFailed(password_too_short_message()));
     }
 
     if body.password.len() > MAX_PASSWORD_LEN {
-        return Err(AppError::ValidationFailed(format!(
-            "password must be at most {MAX_PASSWORD_LEN} characters"
-        )));
+        return Err(AppError::ValidationFailed(password_too_long_message()));
     }
 
-    let username_lower = body.username.to_lowercase();
-    if RESERVED_USERNAMES.contains(&username_lower.as_str()) {
+    let normalized_username = body.username.trim().to_lowercase();
+    if !is_valid_username(&normalized_username) {
+        return Err(AppError::ValidationFailed(invalid_username_message()));
+    }
+
+    if RESERVED_USERNAMES.contains(&normalized_username.as_str()) {
         return Err(AppError::ValidationFailed(
-            "username is reserved".to_string(),
+            MSG_USERNAME_RESERVED.to_string(),
         ));
+    }
+
+    let display_name = body.display_name.trim();
+    if display_name.is_empty() || display_name.chars().count() > MAX_DISPLAY_NAME_LEN {
+        return Err(AppError::ValidationFailed(invalid_display_name_message()));
     }
 
     let normalized_email = normalize_email(&body.email);
@@ -238,20 +249,22 @@ async fn register(
         .await?
         .is_some()
     {
-        return Err(AppError::Conflict("email already registered"));
+        return Err(AppError::Conflict(MSG_EMAIL_ALREADY_REGISTERED));
     }
 
     let user = repo::create(
         &mut *tx,
         &normalized_email,
-        &body.username,
-        &body.display_name,
+        &normalized_username,
+        display_name,
         &password_hash,
     )
     .await
     .map_err(|e| match &e {
-        sqlx::Error::Database(db_err) if db_err.constraint() == Some("users_username_key") => {
-            AppError::Conflict("username already taken")
+        sqlx::Error::Database(db_err)
+            if db_err.constraint() == Some("users_username_lower_key") =>
+        {
+            AppError::Conflict(MSG_USERNAME_ALREADY_TAKEN)
         }
         _ => AppError::from(e),
     })?;
@@ -294,9 +307,7 @@ async fn login(
     }
 
     if !is_valid_email(&body.email) {
-        return Err(AppError::ValidationFailed(
-            "invalid email address".to_string(),
-        ));
+        return Err(AppError::ValidationFailed(MSG_INVALID_EMAIL.to_string()));
     }
 
     if body.password.len() < MIN_PASSWORD_LEN || body.password.len() > MAX_PASSWORD_LEN {
@@ -365,15 +376,11 @@ async fn reset_password(
     AppJson(body): AppJson<ResetPasswordRequest>,
 ) -> Result<StatusCode, AppError> {
     if body.new_password.len() < MIN_PASSWORD_LEN {
-        return Err(AppError::ValidationFailed(format!(
-            "password must be at least {MIN_PASSWORD_LEN} characters"
-        )));
+        return Err(AppError::ValidationFailed(password_too_short_message()));
     }
 
     if body.new_password.len() > MAX_PASSWORD_LEN {
-        return Err(AppError::ValidationFailed(format!(
-            "password must be at most {MAX_PASSWORD_LEN} characters"
-        )));
+        return Err(AppError::ValidationFailed(password_too_long_message()));
     }
 
     let token_hash = service::hash_token(&body.token);
@@ -506,7 +513,7 @@ async fn verify_email(
             if db_err.constraint() == Some("users_email_verified_unique") =>
         {
             repo::delete_unverified_user(&state.db, user.id).await?;
-            Err(AppError::Conflict("email already registered"))
+            Err(AppError::Conflict(MSG_EMAIL_ALREADY_REGISTERED))
         }
         Err(e) => Err(AppError::from(e)),
     }
@@ -624,7 +631,7 @@ async fn oauth_apple(
         (status = 201, description = "New user created and linked to this Apple identity", body = AuthResponse),
         (status = 401, description = "The identity token itself doesn't verify", body = ErrorResponse),
         (status = 409, description = "Email already registered to a verified account, or username taken", body = ErrorResponse),
-        (status = 422, description = "Missing username/display_name, or username reserved", body = ErrorResponse),
+        (status = 422, description = "Username invalid/reserved, or display name missing/too long", body = ErrorResponse),
     ),
     tag = "auth",
     description = "Used for account creation through Apple OAuth. Use this endpoint when a user does not exist yet.",
@@ -647,17 +654,20 @@ async fn oauth_apple_complete(
         return Ok((StatusCode::OK, Json(response)));
     }
 
-    if body.username.is_empty() || body.display_name.is_empty() {
+    let normalized_username = body.username.trim().to_lowercase();
+    if !is_valid_username(&normalized_username) {
+        return Err(AppError::ValidationFailed(invalid_username_message()));
+    }
+
+    if RESERVED_USERNAMES.contains(&normalized_username.as_str()) {
         return Err(AppError::ValidationFailed(
-            "all fields are required".to_string(),
+            MSG_USERNAME_RESERVED.to_string(),
         ));
     }
 
-    let username_lower = body.username.to_lowercase();
-    if RESERVED_USERNAMES.contains(&username_lower.as_str()) {
-        return Err(AppError::ValidationFailed(
-            "username is reserved".to_string(),
-        ));
+    let display_name = body.display_name.trim();
+    if display_name.is_empty() || display_name.chars().count() > MAX_DISPLAY_NAME_LEN {
+        return Err(AppError::ValidationFailed(invalid_display_name_message()));
     }
 
     // Trust the provider's own claim immediately if it asserted verification;
@@ -677,14 +687,14 @@ async fn oauth_apple_complete(
             .await?
             .is_some()
     {
-        return Err(AppError::Conflict("email already registered"));
+        return Err(AppError::Conflict(MSG_EMAIL_ALREADY_REGISTERED));
     }
 
     let user = match repo::create_with_oauth(
         &mut tx,
         &email,
-        &body.username,
-        &body.display_name,
+        &normalized_username,
+        display_name,
         "apple",
         &claims.sub,
         email_verified_at,
@@ -715,10 +725,12 @@ async fn oauth_apple_complete(
         Err(sqlx::Error::Database(db_err))
             if db_err.constraint() == Some("users_email_verified_unique") =>
         {
-            return Err(AppError::Conflict("email already registered"));
+            return Err(AppError::Conflict(MSG_EMAIL_ALREADY_REGISTERED));
         }
-        Err(sqlx::Error::Database(db_err)) if db_err.constraint() == Some("users_username_key") => {
-            return Err(AppError::Conflict("username already taken"));
+        Err(sqlx::Error::Database(db_err))
+            if db_err.constraint() == Some("users_username_lower_key") =>
+        {
+            return Err(AppError::Conflict(MSG_USERNAME_ALREADY_TAKEN));
         }
         Err(e) => return Err(AppError::from(e)),
     };
@@ -754,12 +766,10 @@ async fn username_available(
     State(state): State<AppState>,
     Path(username): Path<String>,
 ) -> Result<Json<UsernameAvailableResponse>, AppError> {
-    let username_lower = username.to_lowercase();
-    let available = if RESERVED_USERNAMES.contains(&username_lower.as_str()) {
-        false
-    } else {
-        !repo::username_exists(&state.db, &username).await?
-    };
+    let normalized = username.trim().to_lowercase();
+    let available = is_valid_username(&normalized)
+        && !RESERVED_USERNAMES.contains(&normalized.as_str())
+        && !repo::username_exists(&state.db, &normalized).await?;
 
     Ok(Json(UsernameAvailableResponse { available }))
 }
@@ -796,6 +806,32 @@ fn is_valid_email(email: &str) -> bool {
     let local = parts.next().unwrap_or("");
     let domain = parts.next().unwrap_or("");
     !local.is_empty() && domain.contains('.')
+}
+
+// Expects an already-trimmed, already-lowercased username.
+fn is_valid_username(username: &str) -> bool {
+    (MIN_USERNAME_LEN..=MAX_USERNAME_LEN).contains(&username.len())
+        && username
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+}
+
+fn password_too_short_message() -> String {
+    format!("password must be at least {MIN_PASSWORD_LEN} characters")
+}
+
+fn password_too_long_message() -> String {
+    format!("password must be at most {MAX_PASSWORD_LEN} characters")
+}
+
+fn invalid_username_message() -> String {
+    format!(
+        "username must be {MIN_USERNAME_LEN}-{MAX_USERNAME_LEN} characters (lowercase letters, numbers, and underscores only)"
+    )
+}
+
+fn invalid_display_name_message() -> String {
+    format!("display name must be 1-{MAX_DISPLAY_NAME_LEN} characters")
 }
 
 async fn issue_verification_link(
