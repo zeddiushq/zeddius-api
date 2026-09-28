@@ -7,7 +7,7 @@ use super::model::{UpdateUserRequest, UserResponse};
 use super::repo;
 use crate::auth::extractor::VerifiedUser;
 use crate::error::{AppError, ErrorResponse};
-use crate::extract::AppJson;
+use crate::extractor::AppJson;
 use crate::state::AppState;
 
 pub fn router() -> OpenApiRouter<AppState> {
