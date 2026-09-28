@@ -10,7 +10,7 @@ use super::model::{CreateSleepLogRequest, SleepLog, SleepLogQuery};
 use super::repo;
 use crate::auth::extractor::VerifiedUser;
 use crate::error::{AppError, ErrorResponse};
-use crate::extract::AppJson;
+use crate::extractor::AppJson;
 use crate::state::AppState;
 
 const DEFAULT_RANGE_DAYS: i64 = 30;

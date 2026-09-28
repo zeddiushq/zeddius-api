@@ -27,7 +27,7 @@ use crate::domain::user::model::{
 };
 use crate::domain::user::repo;
 use crate::error::{AppError, ErrorResponse};
-use crate::extract::AppJson;
+use crate::extractor::AppJson;
 use crate::state::AppState;
 
 const VERIFICATION_TOKEN_TTL_MINS: i64 = 30;
@@ -603,10 +603,6 @@ async fn oauth_apple(
                 }
                 user
             }
-            // Lost a race with another call linking this same identity (e.g. a
-            // retried request) — that call's row already exists, so this is the
-            // same idempotent case as the check above, just caught a few
-            // milliseconds later: log in, don't treat it as an error.
             Err(sqlx::Error::Database(db_err))
                 if db_err.constraint() == Some("oauth_accounts_provider_provider_user_id_key") =>
             {

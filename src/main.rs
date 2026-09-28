@@ -3,7 +3,7 @@ mod config;
 mod db;
 mod domain;
 mod error;
-mod extract;
+mod extractor;
 mod openapi;
 mod state;
 

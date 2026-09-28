@@ -8,7 +8,7 @@ use super::model::{DailyCheckin, DailyCheckinQuery, UpsertDailyCheckinRequest};
 use super::repo;
 use crate::auth::extractor::VerifiedUser;
 use crate::error::{AppError, ErrorResponse};
-use crate::extract::AppJson;
+use crate::extractor::AppJson;
 use crate::state::AppState;
 
 // `upsert` and `close` are both POST at different paths, so they can't
