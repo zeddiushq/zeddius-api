@@ -24,9 +24,7 @@ pub struct User {
     pub target_weekly_lifts: Option<i16>,
     pub timezone: String,
     pub email_verified_at: Option<DateTime<Utc>>,
-    // Matching and expiry are both checked in SQL (find_by_verification_token,
-    // find_by_password_reset_token), so these are never read again once a row
-    // comes back — present only because they're real columns `SELECT *` picks up.
+    // Checked in SQL by the finder queries, never read again in Rust; present because `SELECT *` picks them up.
     #[allow(dead_code)]
     pub email_verification_token_hash: Option<String>,
     #[allow(dead_code)]
@@ -88,12 +86,7 @@ impl From<User> for UserResponse {
     }
 }
 
-// Every field is "leave unchanged if omitted" (via SQL COALESCE in
-// repo::update), not "set to null if omitted" — same limitation as
-// UpdateFoodEntryRequest. `#[serde(default)]` on each field means a client
-// can send only the fields it's changing (unlike UpdateFoodEntryRequest,
-// which requires every key present); this is the intended shape for a
-// small settings-style PATCH.
+// SQL COALESCE means omitted = unchanged, not set-to-null. `#[serde(default)]` lets clients send only changed fields.
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct UpdateUserRequest {
     #[serde(default)]
@@ -146,10 +139,7 @@ pub struct UsernameAvailableResponse {
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct AppleAuthRequest {
     pub identity_token: String,
-    // The raw nonce the client generated before hashing it into the SIWA
-    // request sent to Apple. Optional for now (older clients don't send one
-    // yet) — when present, it's verified against the identity token's own
-    // `nonce` claim to reject replay of a captured token. See auth/apple.rs.
+    // Optional for now — older clients don't send one yet. See auth/apple.rs.
     pub nonce: Option<String>,
 }
 

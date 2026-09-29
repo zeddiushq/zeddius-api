@@ -21,11 +21,7 @@ use crate::state::AppState;
 const DEFAULT_RANGE_DAYS: i64 = 30;
 
 pub fn router() -> OpenApiRouter<AppState> {
-    // Split by HTTP method within each call: `routes!` panics at runtime
-    // ("Overlapping method route") if two handlers in the same call share a
-    // method, even at different paths — so `create` (POST /workouts) and
-    // `create_lift_sets` (POST .../lift-sets) can't be in the same call,
-    // and likewise `update` and `update_lift_set` (both PATCH).
+    // Split by HTTP method: `routes!` panics if two handlers in one call share a method.
     OpenApiRouter::new()
         .routes(routes!(list, create))
         .routes(routes!(get_workout, update, delete))
@@ -45,6 +41,7 @@ pub fn router() -> OpenApiRouter<AppState> {
     ),
     security(("bearer_auth" = [])),
     tag = "workouts",
+    description = "List the caller's workouts in a date range.",
 )]
 async fn list(
     State(state): State<AppState>,
@@ -71,6 +68,7 @@ async fn list(
     ),
     security(("bearer_auth" = [])),
     tag = "workouts",
+    description = "Create a workout.",
 )]
 async fn create(
     State(state): State<AppState>,
@@ -94,6 +92,7 @@ async fn create(
     ),
     security(("bearer_auth" = [])),
     tag = "workouts",
+    description = "Get a workout's detail, including lift sets and run session.",
 )]
 async fn get_workout(
     State(state): State<AppState>,
@@ -117,6 +116,7 @@ async fn get_workout(
     ),
     security(("bearer_auth" = [])),
     tag = "workouts",
+    description = "Update a workout.",
 )]
 async fn update(
     State(state): State<AppState>,
@@ -127,10 +127,7 @@ async fn update(
     if let Some(ty) = &req.r#type {
         validate_type(ty)?;
     }
-    // ended_at needs validating against whichever started_at will actually be
-    // in effect after this update — the request's own value if it sets one,
-    // otherwise the row's current value (a partial update can patch ended_at
-    // alone).
+    // Validate against the effective started_at: the request's value if set, else the row's current one.
     if req.ended_at.is_some() {
         let effective_started_at = match req.started_at {
             Some(started) => Some(started),
@@ -157,6 +154,7 @@ async fn update(
     ),
     security(("bearer_auth" = [])),
     tag = "workouts",
+    description = "Delete a workout.",
 )]
 async fn delete(
     State(state): State<AppState>,
@@ -184,6 +182,7 @@ async fn delete(
     ),
     security(("bearer_auth" = [])),
     tag = "workouts",
+    description = "Bulk-create lift sets for a workout.",
 )]
 async fn create_lift_sets(
     State(state): State<AppState>,
@@ -191,9 +190,7 @@ async fn create_lift_sets(
     Path(workout_id): Path<Uuid>,
     AppJson(req): AppJson<BulkCreateLiftSetsRequest>,
 ) -> Result<Json<Vec<LiftSet>>, AppError> {
-    // 404 up front if the workout doesn't exist or isn't the caller's —
-    // otherwise a bulk insert against someone else's workout_id would just
-    // silently violate the FK and surface as a confusing 500.
+    // 404 up front — otherwise an insert against someone else's workout_id surfaces as a confusing 500.
     if repo::get(&state.db, workout_id, auth.user_id)
         .await?
         .is_none()
@@ -231,6 +228,7 @@ async fn create_lift_sets(
     ),
     security(("bearer_auth" = [])),
     tag = "workouts",
+    description = "Update a lift set.",
 )]
 async fn update_lift_set(
     State(state): State<AppState>,
@@ -255,6 +253,7 @@ async fn update_lift_set(
     ),
     security(("bearer_auth" = [])),
     tag = "workouts",
+    description = "Create or replace a workout's run session.",
 )]
 async fn create_run_session(
     State(state): State<AppState>,
@@ -284,9 +283,7 @@ async fn create_run_session(
     Ok(Json(session))
 }
 
-// Never trust a client-computed pace — same spirit as sleep_logs'
-// duration_minutes. Both inputs are already validated positive by the
-// caller, so the division is safe.
+// Caller already validated both inputs positive, so the division is safe.
 fn compute_pace(distance_meters: Decimal, duration_seconds: i32) -> i32 {
     let distance_km = distance_meters / Decimal::from(1000);
     let pace = Decimal::from(duration_seconds) / distance_km;

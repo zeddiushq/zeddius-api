@@ -11,11 +11,7 @@ use crate::error::{AppError, ErrorResponse};
 use crate::extractor::AppJson;
 use crate::state::AppState;
 
-// `upsert` and `close` are both POST at different paths, so they can't
-// share a `routes!` call ("routes! panics on two handlers sharing a
-// method in one call, even at different paths" — same constraint as every
-// other domain module). `close` and `reopen` share a path but differ in
-// method, so those two combine fine.
+// `upsert`/`close` are both POST at different paths, so they need separate `routes!` calls.
 pub fn router() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
         .routes(routes!(list, upsert))
@@ -33,6 +29,7 @@ pub fn router() -> OpenApiRouter<AppState> {
     ),
     security(("bearer_auth" = [])),
     tag = "checkins",
+    description = "List the caller's daily check-ins in a date range.",
 )]
 async fn list(
     State(state): State<AppState>,
@@ -54,6 +51,7 @@ async fn list(
     ),
     security(("bearer_auth" = [])),
     tag = "checkins",
+    description = "Create or replace a day's check-in.",
 )]
 async fn upsert(
     State(state): State<AppState>,
@@ -75,6 +73,7 @@ async fn upsert(
     ),
     security(("bearer_auth" = [])),
     tag = "checkins",
+    description = "Close a day's check-in.",
 )]
 async fn close(
     State(state): State<AppState>,
@@ -97,6 +96,7 @@ async fn close(
     ),
     security(("bearer_auth" = [])),
     tag = "checkins",
+    description = "Reopen a closed day's check-in.",
 )]
 async fn reopen(
     State(state): State<AppState>,

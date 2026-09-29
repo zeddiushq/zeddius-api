@@ -15,8 +15,6 @@ pub fn user_agent(headers: &HeaderMap) -> Option<&str> {
     headers.get(axum::http::header::USER_AGENT)?.to_str().ok()
 }
 
-// Pure assembly — no I/O, reusable regardless of how the tokens were issued
-// (plain pool or inside a transaction).
 pub fn build_auth_response(
     user: User,
     access_token: String,
@@ -52,8 +50,7 @@ pub async fn issue_token_pair(
     )
     .await
     .map_err(|e| match &e {
-        // In case the user row was deleted between being looked up and being
-        // issued tokens here.
+        // user row deleted between lookup and token issuance
         sqlx::Error::Database(db_err)
             if db_err.constraint() == Some("access_tokens_user_id_fkey") =>
         {
@@ -65,8 +62,7 @@ pub async fn issue_token_pair(
     Ok((access_token, refresh_token))
 }
 
-// Issues a fresh token pair against the plain pool and builds the response.
-// Covers every path except `refresh`, which needs the transactional executor.
+// `refresh` needs a transactional executor and calls issue_token_pair directly instead.
 pub async fn issue_token_pair_and_build_auth_response(
     state: &AppState,
     user: User,

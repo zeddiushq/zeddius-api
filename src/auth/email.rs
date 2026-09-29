@@ -59,10 +59,7 @@ pub async fn send_oauth_linked_notice(
     .await
 }
 
-// Plain HTTP call against Resend's REST API — no dedicated SDK. Failure here
-// is logged by the caller and does not fail the request that triggered it;
-// whatever token/code prompted the email is already stored, so a resend
-// (verification code) or a repeat request (password reset) can recover it.
+// Caller logs failures without failing the request — the token/code is already stored and recoverable.
 async fn send(
     client: &Client,
     config: &Config,

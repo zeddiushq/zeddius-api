@@ -22,8 +22,6 @@ pub struct CreateTaskRequest {
     pub target_count_per_week: Option<i16>,
 }
 
-// Every field is "leave unchanged if omitted", same COALESCE-PATCH
-// convention as every other domain's Update request.
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct UpdateTaskRequest {
     #[serde(default)]
@@ -36,11 +34,7 @@ pub struct UpdateTaskRequest {
     pub active: Option<bool>,
 }
 
-// No server-side "today"/"this week" computation — this is a raw log the
-// client buckets itself, same as every other day-scoped feature in this
-// app. `from`/`to` are required (not defaulted) since there's no sensible
-// default range for a raw completion log without the server knowing
-// "today" in the client's timezone.
+// from/to required, not defaulted — server doesn't know "today" in the client's timezone.
 #[derive(Debug, Deserialize, IntoParams)]
 pub struct TaskCompletionQuery {
     pub from: NaiveDate,

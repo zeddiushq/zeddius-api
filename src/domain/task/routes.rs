@@ -15,9 +15,7 @@ use crate::error::{AppError, ErrorResponse};
 use crate::extractor::AppJson;
 use crate::state::AppState;
 
-// Split by HTTP method: `routes!` panics at runtime ("Overlapping method
-// route") if two handlers in the same call share a method, even at
-// different paths — same constraint documented in domain/workout/routes.rs.
+// Split by HTTP method: `routes!` panics if two handlers in one call share a method.
 pub fn router() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
         .routes(routes!(list, create, update))
@@ -37,6 +35,7 @@ pub fn router() -> OpenApiRouter<AppState> {
     ),
     security(("bearer_auth" = [])),
     tag = "tasks",
+    description = "List the caller's active recurring tasks.",
 )]
 async fn list(
     State(state): State<AppState>,
@@ -58,6 +57,7 @@ async fn list(
     ),
     security(("bearer_auth" = [])),
     tag = "tasks",
+    description = "Create a recurring task.",
 )]
 async fn create(
     State(state): State<AppState>,
@@ -83,6 +83,7 @@ async fn create(
     ),
     security(("bearer_auth" = [])),
     tag = "tasks",
+    description = "Update a recurring task.",
 )]
 async fn update(
     State(state): State<AppState>,
@@ -90,12 +91,8 @@ async fn update(
     Path(id): Path<Uuid>,
     AppJson(req): AppJson<UpdateTaskRequest>,
 ) -> Result<Json<DailyTask>, AppError> {
-    // recurrence and target_count_per_week must stay consistent as a pair,
-    // so a PATCH touching only one of them is validated against the
-    // *effective* value of the other (the request's own value if it's
-    // changing, otherwise the row's current value) — same "fetch current
-    // row for cross-field validation" shape as workout::routes::update's
-    // ended_at/started_at check.
+    // recurrence and target_count_per_week must stay consistent as a pair, so a PATCH
+    // touching only one is validated against the current row's value for the other.
     if req.recurrence.is_some() || req.target_count_per_week.is_some() {
         let current = repo::get(&state.db, id, auth.user_id)
             .await?
@@ -120,6 +117,7 @@ async fn update(
     ),
     security(("bearer_auth" = [])),
     tag = "tasks",
+    description = "Delete a recurring task.",
 )]
 async fn delete(
     State(state): State<AppState>,
@@ -145,6 +143,7 @@ async fn delete(
     ),
     security(("bearer_auth" = [])),
     tag = "tasks",
+    description = "List the caller's task completions in a date range.",
 )]
 async fn list_completions(
     State(state): State<AppState>,
@@ -168,6 +167,7 @@ async fn list_completions(
     ),
     security(("bearer_auth" = [])),
     tag = "tasks",
+    description = "Mark a task complete for a date.",
 )]
 async fn complete(
     State(state): State<AppState>,
@@ -193,6 +193,7 @@ async fn complete(
     ),
     security(("bearer_auth" = [])),
     tag = "tasks",
+    description = "Remove a task's completion for a date.",
 )]
 async fn uncomplete(
     State(state): State<AppState>,

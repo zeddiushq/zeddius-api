@@ -23,6 +23,7 @@ pub fn router() -> OpenApiRouter<AppState> {
     ),
     security(("bearer_auth" = [])),
     tag = "exercises",
+    description = "List the exercise library.",
 )]
 async fn list(
     State(state): State<AppState>,

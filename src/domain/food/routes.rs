@@ -33,6 +33,7 @@ pub fn router() -> OpenApiRouter<AppState> {
     ),
     security(("bearer_auth" = [])),
     tag = "food",
+    description = "List the caller's food entries in a date range.",
 )]
 async fn list(
     State(state): State<AppState>,
@@ -59,6 +60,7 @@ async fn list(
     ),
     security(("bearer_auth" = [])),
     tag = "food",
+    description = "Log a food entry.",
 )]
 async fn create(
     State(state): State<AppState>,
@@ -93,6 +95,7 @@ async fn create(
     ),
     security(("bearer_auth" = [])),
     tag = "food",
+    description = "Update a food entry.",
 )]
 async fn update(
     State(state): State<AppState>,
@@ -130,6 +133,7 @@ async fn update(
     ),
     security(("bearer_auth" = [])),
     tag = "food",
+    description = "Delete a food entry.",
 )]
 async fn delete(
     State(state): State<AppState>,

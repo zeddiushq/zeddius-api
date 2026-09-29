@@ -19,9 +19,7 @@ pub struct UpsertDailyCheckinRequest {
     pub tomorrow_focus: Option<String>,
 }
 
-// Required, not defaulted — same reasoning as TaskCompletionQuery: no
-// sensible default range without the server knowing "today" in the
-// client's timezone.
+// Required, not defaulted — server doesn't know "today" in the client's timezone.
 #[derive(Debug, Deserialize, IntoParams)]
 pub struct DailyCheckinQuery {
     pub from: NaiveDate,
