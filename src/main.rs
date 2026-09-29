@@ -86,10 +86,39 @@ async fn main() -> anyhow::Result<()> {
         listener,
         app.into_make_service_with_connect_info::<SocketAddr>(),
     )
+    .with_graceful_shutdown(shutdown_signal())
     .await
     .context("server error")?;
 
     Ok(())
+}
+
+// Cloud Run sends SIGTERM before killing the container (SIGKILL ~10s later
+// if we haven't exited). Without this, axum installs no signal handling at
+// all, so SIGTERM falls through to the OS default (terminate immediately) —
+// any request in flight at that instant gets its connection reset instead of
+// finishing. This stops accepting new connections on the signal and lets
+// in-flight ones drain within whatever's left of that window.
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        tokio::signal::ctrl_c()
+            .await
+            .expect("failed to install Ctrl+C handler");
+    };
+
+    let terminate = async {
+        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("failed to install SIGTERM handler")
+            .recv()
+            .await;
+    };
+
+    tokio::select! {
+        _ = ctrl_c => {},
+        _ = terminate => {},
+    }
+
+    info!("shutdown signal received, draining in-flight requests");
 }
 
 #[derive(Serialize)]
