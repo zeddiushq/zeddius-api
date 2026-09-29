@@ -7,9 +7,8 @@ pub struct Config {
     pub apple_services_id: String,
     pub resend_api_key: String,
     pub resend_from_email: String,
-    // Origin zeddius-web is served from — used to build the password reset
-    // link emailed to the user. No trailing slash (e.g. "https://zeddius.com").
     pub web_base_url: String,
+    pub docs_public: bool,
 }
 
 impl Config {
@@ -24,6 +23,9 @@ impl Config {
             resend_api_key: required("RESEND_API_KEY")?,
             resend_from_email: required("RESEND_FROM_EMAIL")?,
             web_base_url: required("WEB_BASE_URL")?,
+            docs_public: optional("DOCS_PUBLIC", "false")
+                .parse()
+                .context("DOCS_PUBLIC must be \"true\" or \"false\"")?,
         })
     }
 }

@@ -146,6 +146,11 @@ pub struct UsernameAvailableResponse {
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct AppleAuthRequest {
     pub identity_token: String,
+    // The raw nonce the client generated before hashing it into the SIWA
+    // request sent to Apple. Optional for now (older clients don't send one
+    // yet) — when present, it's verified against the identity token's own
+    // `nonce` claim to reject replay of a captured token. See auth/apple.rs.
+    pub nonce: Option<String>,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -153,6 +158,7 @@ pub struct AppleCompleteRequest {
     pub identity_token: String,
     pub username: String,
     pub display_name: String,
+    pub nonce: Option<String>,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]

@@ -52,9 +52,11 @@ async fn main() -> anyhow::Result<()> {
         .nest("/v1", domain::checkin::routes::router())
         .split_for_parts();
 
-    let app = router
-        .route("/health", routing::get(health))
-        .merge(Scalar::with_url("/docs", api))
+    let mut app = router.route("/health", routing::get(health));
+    if state.config.docs_public {
+        app = app.merge(Scalar::with_url("/docs", api));
+    }
+    let app = app
         .fallback(fallback)
         .layer(TraceLayer::new_for_http())
         .with_state(state);
