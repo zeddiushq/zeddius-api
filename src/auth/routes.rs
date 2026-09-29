@@ -5,6 +5,7 @@ use axum::{
     extract::{Path, State},
 };
 use chrono::{Duration as ChronoDuration, Utc};
+use std::sync::LazyLock;
 use std::time::Duration as StdDuration;
 use tokio::time;
 use tower_governor::GovernorLayer;
@@ -318,13 +319,22 @@ async fn login(
 
     // Login does not require verification, so we allow any unverified account to log in.
     let mut user = None;
+    let mut checked_a_password = false;
     for candidate in repo::find_all_by_email(&state.db, &normalized_email).await? {
-        if let Some(hash) = candidate.password_hash.as_deref()
-            && service::verify_password(&body.password, hash)?
-        {
-            user = Some(candidate);
-            break;
+        if let Some(hash) = candidate.password_hash.as_deref() {
+            checked_a_password = true;
+            if service::verify_password(&body.password, hash)? {
+                user = Some(candidate);
+                break;
+            }
         }
+    }
+    if !checked_a_password {
+        // No row had a password to check against (no account with this email,
+        // or only OAuth-only accounts) — burn the same Argon2 cost anyway so
+        // "no such account" can't be distinguished from "wrong password" by
+        // response timing.
+        let _ = service::verify_password(&body.password, dummy_password_hash());
     }
     let user = user.ok_or(AppError::Unauthorized)?;
 
@@ -803,6 +813,16 @@ async fn verify_apple_identity_with_email(
     let normalized_email = normalize_email(&email);
 
     Ok((claims, normalized_email))
+}
+
+// A fixed, valid Argon2 hash with no corresponding real password — verifying
+// against it costs the same as a real check, purely to normalize login timing.
+fn dummy_password_hash() -> &'static str {
+    static HASH: LazyLock<String> = LazyLock::new(|| {
+        service::hash_password("zeddius-timing-normalization-not-a-real-password")
+            .expect("hashing a fixed string cannot fail")
+    });
+    &HASH
 }
 
 fn normalize_email(email: &str) -> String {
