@@ -54,7 +54,19 @@ async fn main() -> anyhow::Result<()> {
 
     let mut app = router.route("/health", routing::get(health));
     if state.config.docs_public {
-        app = app.merge(Scalar::with_url("/docs", api));
+        // Raw spec alongside the interactive UI — utoipa-scalar only embeds
+        // it inline in the /docs HTML, with no JSON endpoint of its own, but
+        // API clients (Bruno, Postman, codegen) want a URL they can import
+        // or poll directly.
+        app = app
+            .route(
+                "/docs/openapi.json",
+                routing::get({
+                    let api = api.clone();
+                    move || async move { Json(api) }
+                }),
+            )
+            .merge(Scalar::with_url("/docs", api));
     }
     let app = app
         .fallback(fallback)
