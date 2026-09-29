@@ -575,7 +575,9 @@ async fn oauth_apple(
     headers: HeaderMap,
     AppJson(body): AppJson<AppleAuthRequest>,
 ) -> Result<Response, AppError> {
-    let (claims, email) = verify_apple_identity_with_email(&state, &body.identity_token).await?;
+    let (claims, email) =
+        verify_apple_identity_with_email(&state, &body.identity_token, body.nonce.as_deref())
+            .await?;
 
     // Idempotency
     if let Some(user) = repo::find_by_oauth(&state.db, "apple", &claims.sub).await? {
@@ -659,7 +661,9 @@ async fn oauth_apple_complete(
     headers: HeaderMap,
     AppJson(body): AppJson<AppleCompleteRequest>,
 ) -> Result<(StatusCode, Json<AuthResponse>), AppError> {
-    let (claims, email) = verify_apple_identity_with_email(&state, &body.identity_token).await?;
+    let (claims, email) =
+        verify_apple_identity_with_email(&state, &body.identity_token, body.nonce.as_deref())
+            .await?;
 
     // Idempotency
     if let Some(user) = repo::find_by_oauth(&state.db, "apple", &claims.sub).await? {
@@ -795,14 +799,16 @@ async fn username_available(
 async fn verify_apple_identity_with_email(
     state: &AppState,
     identity_token: &str,
+    nonce: Option<&str>,
 ) -> Result<(apple::AppleClaims, String), AppError> {
     let valid_audiences = [
         state.config.apple_bundle_id.as_str(),
         state.config.apple_services_id.as_str(),
     ];
-    let claims = apple::verify_identity_token(&state.http_client, identity_token, &valid_audiences)
-        .await
-        .map_err(|_| AppError::Unauthorized)?;
+    let claims =
+        apple::verify_identity_token(&state.http_client, identity_token, &valid_audiences, nonce)
+            .await
+            .map_err(|_| AppError::Unauthorized)?;
 
     let email = claims.email.clone().ok_or_else(|| {
         AppError::Internal(anyhow::anyhow!(
