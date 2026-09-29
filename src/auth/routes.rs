@@ -193,6 +193,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         (status = 422, description = "Missing fields, invalid email, password not 8-128 characters, username invalid/reserved, or display name too long", body = ErrorResponse),
     ),
     tag = "auth",
+    description = "Create a new account with email and password.",
 )]
 async fn register(
     State(state): State<AppState>,
@@ -244,8 +245,7 @@ async fn register(
 
     repo::lock_email(&mut *tx, &normalized_email).await?;
 
-    // unverified duplicates are allowed to coexist, so that no one can squat an
-    // email address, but never once a verified owner exists.
+    // unverified duplicates may coexist, but never alongside a verified owner
     if repo::find_verified_by_email(&mut *tx, &normalized_email)
         .await?
         .is_some()
@@ -297,6 +297,7 @@ async fn register(
         (status = 422, description = "Missing fields, or invalid email address", body = ErrorResponse),
     ),
     tag = "auth",
+    description = "Sign in with email and password.",
 )]
 async fn login(
     State(state): State<AppState>,
@@ -317,7 +318,6 @@ async fn login(
 
     let normalized_email = normalize_email(&body.email);
 
-    // Login does not require verification, so we allow any unverified account to log in.
     let mut user = None;
     let mut checked_a_password = false;
     for candidate in repo::find_all_by_email(&state.db, &normalized_email).await? {
@@ -330,10 +330,7 @@ async fn login(
         }
     }
     if !checked_a_password {
-        // No row had a password to check against (no account with this email,
-        // or only OAuth-only accounts) — burn the same Argon2 cost anyway so
-        // "no such account" can't be distinguished from "wrong password" by
-        // response timing.
+        // Burn the same Argon2 cost so "no account" isn't distinguishable from "wrong password" by timing.
         let _ = service::verify_password(&body.password, dummy_password_hash());
     }
     let user = user.ok_or(AppError::Unauthorized)?;
@@ -356,6 +353,7 @@ async fn login(
         (status = 204, description = "Always returned regardless of whether the email matches an account — deliberately no enumeration signal. A reset link is emailed only if a matching, verified, password-holding account exists."),
     ),
     tag = "auth",
+    description = "Request a password reset link by email.",
 )]
 async fn forgot_password(
     State(state): State<AppState>,
@@ -380,6 +378,7 @@ async fn forgot_password(
         (status = 422, description = "Password not 8-128 characters", body = ErrorResponse),
     ),
     tag = "auth",
+    description = "Reset a password using a token from the emailed link.",
 )]
 async fn reset_password(
     State(state): State<AppState>,
@@ -417,6 +416,7 @@ async fn reset_password(
         (status = 401, description = "Refresh token invalid, expired, or revoked", body = ErrorResponse),
     ),
     tag = "auth",
+    description = "Exchange a refresh token for a new token pair.",
 )]
 async fn refresh(
     State(state): State<AppState>,
@@ -451,6 +451,7 @@ async fn refresh(
     ),
     security(("bearer_auth" = [])),
     tag = "auth",
+    description = "Revoke the caller's current session.",
 )]
 async fn logout(State(state): State<AppState>, auth: AuthUser) -> Result<StatusCode, AppError> {
     repo::revoke_token_pair_by_access_hash(&state.db, &auth.token_hash).await?;
@@ -466,6 +467,7 @@ async fn logout(State(state): State<AppState>, auth: AuthUser) -> Result<StatusC
     ),
     security(("bearer_auth" = [])),
     tag = "auth",
+    description = "List the caller's active sessions.",
 )]
 async fn list_sessions(
     State(state): State<AppState>,
@@ -484,6 +486,7 @@ async fn list_sessions(
     ),
     security(("bearer_auth" = [])),
     tag = "auth",
+    description = "Log out all other devices, keeping the caller's current session.",
 )]
 async fn revoke_sessions(
     State(state): State<AppState>,
@@ -503,6 +506,7 @@ async fn revoke_sessions(
         (status = 409, description = "Email already registered to a different, already-verified account — this row was deleted", body = ErrorResponse),
     ),
     tag = "auth",
+    description = "Verify an email using a token from the emailed link.",
 )]
 async fn verify_email(
     State(state): State<AppState>,
@@ -538,6 +542,7 @@ async fn verify_email(
     ),
     security(("bearer_auth" = [])),
     tag = "auth",
+    description = "Resend the account's email verification link.",
 )]
 async fn resend_verification(
     State(state): State<AppState>,
@@ -557,8 +562,6 @@ async fn resend_verification(
     Ok(StatusCode::NO_CONTENT)
 }
 
-// For existing users. If the original sign in method was not Apple,
-// we link it if both sides have verified the email.
 #[utoipa::path(
     post,
     path = "/auth/oauth/apple",
@@ -569,6 +572,7 @@ async fn resend_verification(
         (status = 401, description = "The identity token itself doesn't verify (bad signature, claims, or missing email)", body = ErrorResponse),
     ),
     tag = "auth",
+    description = "Sign in with Apple for an existing user, linking the identity if the email matches a verified account.",
 )]
 async fn oauth_apple(
     State(state): State<AppState>,
@@ -592,9 +596,6 @@ async fn oauth_apple(
         .into_response());
     }
 
-    // No oauth_accounts row for this sub yet. If the email matches an
-    // existing verified user, link this identity to it, unless the incoming
-    // identity token claims email_verified is false.
     let user = match repo::find_verified_by_email(&state.db, &email).await? {
         Some(user) if claims.email_verified => user,
         _ => return Ok(StatusCode::NO_CONTENT.into_response()),
@@ -654,7 +655,7 @@ async fn oauth_apple(
         (status = 422, description = "Username invalid/reserved, or display name missing/too long", body = ErrorResponse),
     ),
     tag = "auth",
-    description = "Used for account creation through Apple OAuth. Use this endpoint when a user does not exist yet.",
+    description = "Finish a Sign in with Apple flow that returned 204, creating a new account linked to the identity.",
 )]
 async fn oauth_apple_complete(
     State(state): State<AppState>,
@@ -692,18 +693,14 @@ async fn oauth_apple_complete(
         return Err(AppError::ValidationFailed(invalid_display_name_message()));
     }
 
-    // Trust the provider's own claim immediately if it asserted verification;
-    // otherwise this account starts unverified, same as a password signup,
-    // and needs our own code before it can win a contested email.
+    // Otherwise starts unverified, same as a password signup.
     let email_verified_at = claims.email_verified.then(Utc::now);
 
     let mut tx = state.db.begin().await?;
 
     repo::lock_email(&mut *tx, &email).await?;
 
-    // Only the unverified path needs this check — an insert that's already
-    // verified collides atomically with `users_email_verified_unique` if
-    // another verified row exists.
+    // A verified insert would instead collide atomically on users_email_verified_unique.
     if email_verified_at.is_none()
         && repo::find_verified_by_email(&mut *tx, &email)
             .await?
@@ -783,6 +780,7 @@ async fn oauth_apple_complete(
         (status = 200, description = "Availability check result", body = UsernameAvailableResponse),
     ),
     tag = "auth",
+    description = "Check whether a username is valid and available.",
 )]
 async fn username_available(
     State(state): State<AppState>,

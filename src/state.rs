@@ -8,10 +8,7 @@ use std::time::Duration;
 pub struct AppState {
     pub db: PgPool,
     pub config: Arc<Config>,
-    // Built once and reused: Client holds a connection pool (keep-alive
-    // connections, TLS session cache) internally, so cloning it is cheap and
-    // shares that pool, but constructing a new one per call would pay for a
-    // fresh handshake every time.
+    // Cloning shares the internal connection pool; building one per call would re-handshake.
     pub http_client: Client,
 }
 
@@ -20,10 +17,7 @@ impl AppState {
         Self {
             db,
             config: Arc::new(config),
-            // Bounds the whole request (connect + send + receive), not just
-            // the connect phase — a stalled Resend or Apple JWKS response
-            // would otherwise hang the auth request that's waiting on it
-            // indefinitely, since reqwest has no timeout by default.
+            // reqwest has no default timeout; without this a stalled Resend/Apple call hangs forever.
             http_client: Client::builder()
                 .timeout(Duration::from_secs(10))
                 .build()

@@ -5,8 +5,9 @@ use anyhow::{Context, anyhow};
 use jsonwebtoken::{Algorithm, DecodingKey, Validation};
 use reqwest::Client;
 use serde::Deserialize;
-use sha2::{Digest, Sha256};
 use tokio::sync::{Mutex, RwLock};
+
+use super::service;
 
 const JWKS_URL: &str = "https://appleid.apple.com/auth/keys";
 const JWKS_CACHE_TTL: Duration = Duration::from_secs(3600);
@@ -14,10 +15,8 @@ const APPLE_ISSUER: &str = "https://appleid.apple.com";
 
 static JWKS_CACHE: LazyLock<RwLock<Option<(Instant, Jwks)>>> = LazyLock::new(|| RwLock::new(None));
 
-// Serializes JWKS refreshes so concurrent cache misses coalesce into a single
-// fetch instead of each firing its own request to Apple (thundering herd).
-// Deliberately separate from JWKS_CACHE's RwLock: readers hitting a warm
-// cache never contend with this, only requests that also missed do.
+// Coalesces concurrent cache misses into one Apple fetch (thundering herd).
+// Separate from JWKS_CACHE's RwLock so warm-cache reads never contend with it.
 static JWKS_FETCH_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
 #[derive(Debug, Clone, Deserialize)]
@@ -36,14 +35,10 @@ struct Jwk {
 pub struct AppleClaims {
     pub sub: String,
     pub email: Option<String>,
-    // Apple has been observed sending this as either a JSON bool or a
-    // stringified "true"/"false" depending on client version. Missing
-    // entirely (no email in the request) defaults to false, not an error.
+    // Apple sends this as either a JSON bool or a stringified "true"/"false" depending on client version.
     #[serde(default, deserialize_with = "bool_or_string")]
     pub email_verified: bool,
-    // SHA-256 hex digest of the raw nonce the client generated for this
-    // specific sign-in attempt, echoed back by Apple unmodified. Absent on
-    // tokens minted for a request that didn't set a nonce.
+    // SHA-256 hex of the client's raw nonce, echoed back by Apple.
     pub nonce: Option<String>,
 }
 
@@ -64,20 +59,9 @@ where
     })
 }
 
-// Verifies an Apple identity token's signature against Apple's JWKS and checks
-// standard claims (issuer, audience, expiry — expiry is checked by jsonwebtoken
-// automatically). `valid_audiences` accepts tokens minted for any of our own
-// registered client identifiers — the iOS App ID's bundle ID (native Sign in
-// with Apple) and the web Services ID (the redirect-based OAuth flow) mint
-// tokens with different `aud` values for the same physical endpoint.
-//
-// `expected_nonce` is the raw nonce the client generated for this specific
-// sign-in attempt, if it sent one. Apple echoes SHA-256(raw nonce) back in the
-// token's own `nonce` claim, so a match proves this token was minted for the
-// request that's presenting it, not captured and replayed from an earlier
-// one. Optional for now — until every client sends a nonce, a request that
-// doesn't supply one skips this check, same as before this was added.
-// Returns the extracted sub + email on success.
+// `valid_audiences` covers both native (bundle ID) and web (Services ID) clients.
+// `expected_nonce`, if the client sent one, must match the token's nonce claim to rule out replay;
+// optional for now since not every client sends one yet.
 pub async fn verify_identity_token(
     client: &Client,
     identity_token: &str,
@@ -102,19 +86,13 @@ pub async fn verify_identity_token(
         .context("apple identity token verification failed")?;
 
     if let Some(raw_nonce) = expected_nonce {
-        let expected_hash = hash_nonce(raw_nonce);
+        let expected_hash = service::hash_token(raw_nonce);
         if data.claims.nonce.as_deref() != Some(expected_hash.as_str()) {
             anyhow::bail!("identity token nonce does not match the request's nonce");
         }
     }
 
     Ok(data.claims)
-}
-
-fn hash_nonce(raw: &str) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(raw.as_bytes());
-    hex::encode(hasher.finalize())
 }
 
 async fn find_key(client: &Client, kid: &str) -> anyhow::Result<Jwk> {
@@ -168,9 +146,7 @@ mod tests {
 
     #[test]
     fn deserializes_apple_style_jwks_response() {
-        // Shaped like a real response from https://appleid.apple.com/auth/keys —
-        // extra fields (kty, use, alg) present on the real thing but not on Jwk
-        // should just be ignored, not fail deserialization.
+        // extra fields (kty, use, alg) not on Jwk should be ignored, not fail
         let body = r#"{
             "keys": [
                 {

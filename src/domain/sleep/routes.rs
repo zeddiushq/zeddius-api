@@ -30,6 +30,7 @@ pub fn router() -> OpenApiRouter<AppState> {
     ),
     security(("bearer_auth" = [])),
     tag = "sleep",
+    description = "List the caller's sleep logs in a date range.",
 )]
 async fn list(
     State(state): State<AppState>,
@@ -56,6 +57,7 @@ async fn list(
     ),
     security(("bearer_auth" = [])),
     tag = "sleep",
+    description = "Log a sleep entry.",
 )]
 async fn create(
     State(state): State<AppState>,
@@ -78,6 +80,7 @@ async fn create(
     ),
     security(("bearer_auth" = [])),
     tag = "sleep",
+    description = "Delete a sleep log.",
 )]
 async fn delete(
     State(state): State<AppState>,
@@ -92,8 +95,7 @@ async fn delete(
     }
 }
 
-// Returns the computed duration in minutes on success — duration is derived
-// from bed_time/wake_time server-side rather than trusted from the client.
+// Duration is computed server-side, not trusted from the client.
 fn validate(req: &CreateSleepLogRequest) -> Result<i32, AppError> {
     if req
         .quality_score

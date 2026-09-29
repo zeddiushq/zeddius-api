@@ -17,8 +17,6 @@ pub async fn list(db: &PgPool, user_id: Uuid) -> Result<Vec<DailyTask>, sqlx::Er
     .await
 }
 
-// Ownership-scoped fetch, used by routes.rs to 404 before completing/
-// uncompleting a task that isn't the caller's.
 pub async fn get(db: &PgPool, id: Uuid, user_id: Uuid) -> Result<Option<DailyTask>, sqlx::Error> {
     sqlx::query_as!(
         DailyTask,
@@ -77,9 +75,7 @@ pub async fn update(
     .await
 }
 
-// Ownership-scoped: only deletes if `id` belongs to `user_id`. Returns
-// whether a row was actually removed so the handler can 404 rather than
-// distinguish "not found" from "not yours." Completions cascade via FK.
+// Bool lets the handler 404 without distinguishing "not found" from "not yours." Completions cascade via FK.
 pub async fn delete(db: &PgPool, id: Uuid, user_id: Uuid) -> Result<bool, sqlx::Error> {
     let result = sqlx::query!(
         "DELETE FROM daily_tasks WHERE id = $1 AND user_id = $2",
@@ -91,8 +87,6 @@ pub async fn delete(db: &PgPool, id: Uuid, user_id: Uuid) -> Result<bool, sqlx::
     Ok(result.rows_affected() > 0)
 }
 
-// Raw completion rows in range — no server-side "today"/"this week"
-// bucketing, the client does that itself.
 pub async fn list_completions(
     db: &PgPool,
     user_id: Uuid,
@@ -113,9 +107,7 @@ pub async fn list_completions(
     .await
 }
 
-// Idempotent: re-completing an already-completed date is a silent no-op,
-// not a conflict — the UNIQUE constraint on (task_id, completed_date)
-// means a duplicate tap just does nothing.
+// ON CONFLICT DO NOTHING makes a duplicate tap idempotent rather than an error.
 pub async fn complete(
     db: &PgPool,
     task_id: Uuid,

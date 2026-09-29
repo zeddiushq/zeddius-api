@@ -8,10 +8,7 @@ use serde::Serialize;
 use tracing::error;
 use utoipa::ToSchema;
 
-// The one shape every AppError variant serializes to — a single source of
-// truth for both the actual response body (into_response, below) and the
-// OpenAPI schema referenced by every non-2xx `#[utoipa::path]` response, so
-// the two can't silently drift apart.
+// Shared by into_response and the OpenAPI schema so they can't drift apart.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct ErrorResponse {
     pub error: ErrorDetail,

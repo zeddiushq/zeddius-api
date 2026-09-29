@@ -31,10 +31,8 @@ pub struct CreateFoodEntryRequest {
     pub meal_slot: Option<String>,
 }
 
-// Every field is "leave unchanged if omitted" (via SQL COALESCE in repo::update),
-// not "set to null if omitted" — there's no way to clear an already-set nullable
-// field back to null through PATCH. Acceptable for a personal manual-entry app;
-// delete and re-create the entry if a field needs clearing.
+// SQL COALESCE means omitted = unchanged; there's no way to clear a field to null via PATCH.
+// Delete and re-create the entry if a field needs clearing.
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct UpdateFoodEntryRequest {
     pub consumed_at: Option<DateTime<Utc>>,

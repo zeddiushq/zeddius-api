@@ -54,10 +54,7 @@ async fn main() -> anyhow::Result<()> {
 
     let mut app = router.route("/health", routing::get(health));
     if state.config.docs_public {
-        // Raw spec alongside the interactive UI — utoipa-scalar only embeds
-        // it inline in the /docs HTML, with no JSON endpoint of its own, but
-        // API clients (Bruno, Postman, codegen) want a URL they can import
-        // or poll directly.
+        // utoipa-scalar only embeds the spec inline in /docs HTML; clients like Bruno/Postman need a URL.
         app = app
             .route(
                 "/docs/openapi.json",
@@ -93,12 +90,7 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-// Cloud Run sends SIGTERM before killing the container (SIGKILL ~10s later
-// if we haven't exited). Without this, axum installs no signal handling at
-// all, so SIGTERM falls through to the OS default (terminate immediately) —
-// any request in flight at that instant gets its connection reset instead of
-// finishing. This stops accepting new connections on the signal and lets
-// in-flight ones drain within whatever's left of that window.
+// Without this, SIGTERM (sent by Cloud Run before SIGKILL) kills in-flight requests immediately.
 async fn shutdown_signal() {
     let ctrl_c = async {
         tokio::signal::ctrl_c()

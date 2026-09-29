@@ -24,9 +24,7 @@ pub async fn list(
     .await
 }
 
-// True upsert (create-or-replace), like run_sessions — not a COALESCE
-// partial update. There's only one field to set beyond the date, so
-// "leave unchanged if omitted" doesn't apply the way it does elsewhere.
+// True create-or-replace upsert, not COALESCE — only one field beyond the date.
 pub async fn upsert(
     db: &PgPool,
     user_id: Uuid,
@@ -48,8 +46,7 @@ pub async fn upsert(
     .await
 }
 
-// Works even with no prior upsert for that date — Close Day doesn't
-// require a tomorrow_focus to already exist.
+// Works even with no prior upsert for that date.
 pub async fn close(
     db: &PgPool,
     user_id: Uuid,
@@ -70,10 +67,7 @@ pub async fn close(
     .await
 }
 
-// Unlike `close`, not an upsert — reopening a day that was never closed
-// isn't a meaningful action, so this only updates an existing row (returns
-// None if there isn't one, letting the handler 404 rather than silently
-// create a hollow checkin).
+// Unlike `close`, not an upsert — reopening a day that was never closed is meaningless.
 pub async fn reopen(
     db: &PgPool,
     user_id: Uuid,

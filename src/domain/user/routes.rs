@@ -24,6 +24,7 @@ pub fn router() -> OpenApiRouter<AppState> {
     ),
     security(("bearer_auth" = [])),
     tag = "user",
+    description = "Get the authenticated user's profile.",
 )]
 async fn me(
     State(state): State<AppState>,
@@ -52,6 +53,7 @@ async fn me(
     ),
     security(("bearer_auth" = [])),
     tag = "user",
+    description = "Update the authenticated user's profile and targets.",
 )]
 async fn update(
     State(state): State<AppState>,

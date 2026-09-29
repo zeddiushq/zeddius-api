@@ -9,8 +9,7 @@ use crate::domain::user::repo;
 use crate::error::AppError;
 use crate::state::AppState;
 
-// A bearer token always proves identity, regardless of permission — see
-// VerifiedUser below for the separate, route-level permission check.
+// Proves identity only, not permission — see VerifiedUser below.
 #[derive(Clone, Debug)]
 pub struct AuthUser {
     pub user_id: Uuid,
@@ -51,10 +50,7 @@ impl FromRequestParts<AppState> for AuthUser {
     }
 }
 
-// A token always authenticates; this is the separate authorization check.
-// Wraps AuthUser and additionally requires a verified email — the one
-// permission this app currently has. Routes that need it take VerifiedUser
-// instead of AuthUser as their extractor, so the compiler enforces the check.
+// Requires a verified email; using this extractor instead of AuthUser makes the compiler enforce it.
 #[derive(Clone, Debug)]
 pub struct VerifiedUser(pub AuthUser);
 

@@ -8,9 +8,6 @@ use super::model::{
     UpdateLiftSetRequest, UpdateWorkoutRequest, Workout,
 };
 
-// Mirrors the `workouts` columns exactly (no `lift_sets`/`run_session` —
-// neither is a column). `query_as!` maps onto this, then each caller
-// attaches both explicitly via `into_workout`.
 struct WorkoutRow {
     id: Uuid,
     r#type: String,
@@ -60,9 +57,7 @@ pub async fn create(
     Ok(row.into_workout(Vec::new(), None))
 }
 
-// `lift_sets` stays empty here — a workout can have many, so listing them
-// for every row would bloat the response. `run_session` is a cheap 1:1, so
-// it's joined in directly rather than requiring a second request per row.
+// lift_sets stays empty (would bloat every row); run_session is a cheap 1:1, joined directly.
 struct WorkoutListRow {
     id: Uuid,
     r#type: String,
@@ -84,9 +79,6 @@ struct WorkoutListRow {
 
 impl WorkoutListRow {
     fn into_workout(self) -> Workout {
-        // distance_meters/duration_seconds are NOT NULL on run_sessions, so
-        // a matched join row always has them — the `expect`s document that,
-        // not a real possibility of failure.
         let run_session = self.run_session_id.map(|id| RunSession {
             id,
             workout_id: self.id,
@@ -142,8 +134,6 @@ pub async fn list(
     Ok(rows.into_iter().map(WorkoutListRow::into_workout).collect())
 }
 
-// Detail fetch: also populates `lift_sets`/`run_session` with two more
-// queries, unlike `list`/`create` which leave both empty/None.
 pub async fn get(db: &PgPool, id: Uuid, user_id: Uuid) -> Result<Option<Workout>, sqlx::Error> {
     let row = sqlx::query_as!(
         WorkoutRow,
@@ -164,8 +154,6 @@ pub async fn get(db: &PgPool, id: Uuid, user_id: Uuid) -> Result<Option<Workout>
     Ok(Some(row.into_workout(lift_sets, run_session)))
 }
 
-// COALESCE means an omitted field is left unchanged, not cleared. Returns
-// `None` if `id` doesn't exist or isn't owned by `user_id`.
 pub async fn update(
     db: &PgPool,
     id: Uuid,
@@ -193,10 +181,7 @@ pub async fn update(
     Ok(row.map(|r| r.into_workout(Vec::new(), None)))
 }
 
-// Ownership-scoped: only deletes if `id` belongs to `user_id`. Returns
-// whether a row was actually removed so the handler can 404 rather than
-// distinguish "not found" from "not yours." lift_sets/run_session cascade
-// via their FKs.
+// Bool lets the handler 404 without distinguishing "not found" from "not yours." Cascades via FKs.
 pub async fn delete(db: &PgPool, id: Uuid, user_id: Uuid) -> Result<bool, sqlx::Error> {
     let result = sqlx::query!(
         "DELETE FROM workouts WHERE id = $1 AND user_id = $2",
@@ -221,9 +206,7 @@ pub async fn list_lift_sets(db: &PgPool, workout_id: Uuid) -> Result<Vec<LiftSet
     .await
 }
 
-// Returns any `exercise_id`s in `ids` that don't exist in the exercise
-// library, so the handler can 422 cleanly instead of surfacing a raw FK
-// constraint violation as a 500.
+// Lets the handler 422 instead of surfacing a raw FK violation as a 500.
 pub async fn missing_exercise_ids(db: &PgPool, ids: &[Uuid]) -> Result<Vec<Uuid>, sqlx::Error> {
     let existing: Vec<Uuid> =
         sqlx::query_scalar!("SELECT id FROM exercises WHERE id = ANY($1)", ids)
@@ -236,9 +219,7 @@ pub async fn missing_exercise_ids(db: &PgPool, ids: &[Uuid]) -> Result<Vec<Uuid>
         .collect())
 }
 
-// Inserted one at a time in a transaction rather than a single bulk-array
-// statement — simpler to get right, and a lifting session is at most a few
-// dozen sets, so the extra round-trips are not a real cost here.
+// One at a time in a transaction, not a bulk-array statement — simpler, and sessions are only dozens of sets.
 pub async fn bulk_create_lift_sets(
     db: &PgPool,
     workout_id: Uuid,
@@ -271,9 +252,7 @@ pub async fn bulk_create_lift_sets(
     Ok(created)
 }
 
-// Ownership scoped transitively through workout_id -> workouts.user_id,
-// since lift_sets has no direct user_id column. COALESCE means an omitted
-// field is left unchanged.
+// lift_sets has no direct user_id column, so ownership is scoped via workout_id -> workouts.user_id.
 pub async fn update_lift_set(
     db: &PgPool,
     id: Uuid,
@@ -323,8 +302,7 @@ pub async fn get_run_session(
     .await
 }
 
-// One run session per workout (workout_id is UNIQUE) — re-posting replaces
-// whatever was there, rather than erroring.
+// workout_id is UNIQUE — re-posting replaces rather than erroring.
 pub async fn upsert_run_session(
     db: &PgPool,
     workout_id: Uuid,

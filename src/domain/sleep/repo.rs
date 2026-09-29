@@ -46,9 +46,7 @@ pub async fn list(
     .await
 }
 
-// Ownership-scoped: only deletes if `id` belongs to `user_id`. Returns
-// whether a row was actually removed so the handler can 404 rather than
-// distinguish "not found" from "not yours."
+// Bool lets the handler 404 without distinguishing "not found" from "not yours."
 pub async fn delete(db: &PgPool, id: Uuid, user_id: Uuid) -> Result<bool, sqlx::Error> {
     let result = sqlx::query!(
         "DELETE FROM sleep_logs WHERE id = $1 AND user_id = $2",

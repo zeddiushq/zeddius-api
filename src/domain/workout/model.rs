@@ -4,11 +4,8 @@ use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
 
-// Neither `lift_sets` nor `run_session` is a `workouts` column, so neither is
-// part of the `query_as!`-mapped row (see `repo::WorkoutRow`) — both are
-// attached afterward. `repo::list`/`create` leave them empty/None (keeps
-// those to one lightweight query); `repo::get` fetches both in two more
-// queries.
+// lift_sets/run_session aren't workouts columns; repo::list/create leave them empty,
+// repo::get attaches both via two extra queries.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct Workout {
     pub id: Uuid,
@@ -31,8 +28,6 @@ pub struct CreateWorkoutRequest {
     pub notes: Option<String>,
 }
 
-// Every field is "leave unchanged if omitted" (via SQL COALESCE in repo::update),
-// matching the same tradeoff already accepted for food_entries' PATCH.
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct UpdateWorkoutRequest {
     pub r#type: Option<String>,
@@ -90,8 +85,6 @@ pub struct BulkCreateLiftSetsRequest {
     pub sets: Vec<CreateLiftSetRequest>,
 }
 
-// Every field is "leave unchanged if omitted", matching every other PATCH in
-// this API.
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct UpdateLiftSetRequest {
     pub set_number: Option<i16>,
@@ -117,10 +110,8 @@ pub struct RunSession {
     pub gps_path_url: Option<String>,
 }
 
-// No `avg_pace_seconds_per_km` field — it's always computed server-side from
-// distance/duration (see `routes::compute_pace`), never trusted from the
-// client, same spirit as sleep_logs' `duration_minutes`. No `gps_path_url`
-// either — unused until a non-manual (HealthKit/Watch) source exists.
+// avg_pace_seconds_per_km is computed server-side (routes::compute_pace), never trusted from the client.
+// gps_path_url omitted — unused until a non-manual (HealthKit/Watch) source exists.
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct CreateRunSessionRequest {
     pub distance_meters: Decimal,
