@@ -97,12 +97,12 @@ async fn delete(
 }
 
 fn validate(req: &CreateWeightLogRequest) -> Result<(), AppError> {
-    for (name, mass) in [
+    for (name, kg) in [
         ("weight_kg", Some(req.weight_kg)),
         ("muscle_mass_kg", req.muscle_mass_kg),
         ("bone_mass_kg", req.bone_mass_kg),
     ] {
-        if mass.is_some_and(|m| m <= Decimal::ZERO) {
+        if kg.is_some_and(|kg| kg <= Decimal::ZERO) {
             return Err(AppError::ValidationFailed(format!(
                 "{name} must be positive"
             )));
