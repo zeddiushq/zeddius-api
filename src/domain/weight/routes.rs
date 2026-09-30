@@ -97,10 +97,16 @@ async fn delete(
 }
 
 fn validate(req: &CreateWeightLogRequest) -> Result<(), AppError> {
-    if req.weight_kg <= Decimal::ZERO {
-        return Err(AppError::ValidationFailed(
-            "weight_kg must be positive".into(),
-        ));
+    for (name, kg) in [
+        ("weight_kg", Some(req.weight_kg)),
+        ("muscle_mass_kg", req.muscle_mass_kg),
+        ("bone_mass_kg", req.bone_mass_kg),
+    ] {
+        if kg.is_some_and(|kg| kg <= Decimal::ZERO) {
+            return Err(AppError::ValidationFailed(format!(
+                "{name} must be positive"
+            )));
+        }
     }
     for (name, pct) in [
         ("body_fat_pct", req.body_fat_pct),
@@ -109,16 +115,6 @@ fn validate(req: &CreateWeightLogRequest) -> Result<(), AppError> {
         if pct.is_some_and(|p| !(Decimal::ZERO..=Decimal::from(100)).contains(&p)) {
             return Err(AppError::ValidationFailed(format!(
                 "{name} must be between 0 and 100"
-            )));
-        }
-    }
-    for (name, mass) in [
-        ("muscle_mass_kg", req.muscle_mass_kg),
-        ("bone_mass_kg", req.bone_mass_kg),
-    ] {
-        if mass.is_some_and(|m| m <= Decimal::ZERO) {
-            return Err(AppError::ValidationFailed(format!(
-                "{name} must be positive"
             )));
         }
     }
