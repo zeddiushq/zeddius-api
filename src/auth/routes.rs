@@ -222,21 +222,8 @@ async fn register(
         return Err(AppError::ValidationFailed(password_too_long_message()));
     }
 
-    let normalized_username = body.username.trim().to_lowercase();
-    if !is_valid_username(&normalized_username) {
-        return Err(AppError::ValidationFailed(invalid_username_message()));
-    }
-
-    if RESERVED_USERNAMES.contains(&normalized_username.as_str()) {
-        return Err(AppError::ValidationFailed(
-            MSG_USERNAME_RESERVED.to_string(),
-        ));
-    }
-
-    let display_name = body.display_name.trim();
-    if display_name.is_empty() || display_name.chars().count() > MAX_DISPLAY_NAME_LEN {
-        return Err(AppError::ValidationFailed(invalid_display_name_message()));
-    }
+    let (normalized_username, display_name) =
+        validate_username_and_display_name(&body.username, &body.display_name)?;
 
     let normalized_email = normalize_email(&body.email);
     let password_hash = service::hash_password(&body.password)?;
@@ -677,21 +664,8 @@ async fn oauth_apple_complete(
         return Ok((StatusCode::OK, Json(response)));
     }
 
-    let normalized_username = body.username.trim().to_lowercase();
-    if !is_valid_username(&normalized_username) {
-        return Err(AppError::ValidationFailed(invalid_username_message()));
-    }
-
-    if RESERVED_USERNAMES.contains(&normalized_username.as_str()) {
-        return Err(AppError::ValidationFailed(
-            MSG_USERNAME_RESERVED.to_string(),
-        ));
-    }
-
-    let display_name = body.display_name.trim();
-    if display_name.is_empty() || display_name.chars().count() > MAX_DISPLAY_NAME_LEN {
-        return Err(AppError::ValidationFailed(invalid_display_name_message()));
-    }
+    let (normalized_username, display_name) =
+        validate_username_and_display_name(&body.username, &body.display_name)?;
 
     // Otherwise starts unverified, same as a password signup.
     let email_verified_at = claims.email_verified.then(Utc::now);
@@ -864,6 +838,29 @@ fn invalid_username_message() -> String {
 
 fn invalid_display_name_message() -> String {
     format!("display name must be 1-{MAX_DISPLAY_NAME_LEN} characters")
+}
+
+fn validate_username_and_display_name<'a>(
+    username: &str,
+    display_name: &'a str,
+) -> Result<(String, &'a str), AppError> {
+    let normalized_username = username.trim().to_lowercase();
+    if !is_valid_username(&normalized_username) {
+        return Err(AppError::ValidationFailed(invalid_username_message()));
+    }
+
+    if RESERVED_USERNAMES.contains(&normalized_username.as_str()) {
+        return Err(AppError::ValidationFailed(
+            MSG_USERNAME_RESERVED.to_string(),
+        ));
+    }
+
+    let display_name = display_name.trim();
+    if display_name.is_empty() || display_name.chars().count() > MAX_DISPLAY_NAME_LEN {
+        return Err(AppError::ValidationFailed(invalid_display_name_message()));
+    }
+
+    Ok((normalized_username, display_name))
 }
 
 async fn issue_verification_link(
