@@ -7,6 +7,13 @@ on:
     types:
       - closed
 
+# Each run reads Cargo.toml's version and ends by bumping it on main; overlapping runs
+# would read the same version and collide on its tag and registry image. Closed-unmerged
+# PRs get their own group so they can't displace a queued release run.
+concurrency:
+  group: ${{ github.event.pull_request.merged == true && 'production' || format('skipped-{0}', github.run_id) }}
+  cancel-in-progress: false
+
 jobs:
   push-prod:
     name: Push image (prod)
@@ -47,6 +54,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
+          ref: main
           token: ${{ steps.app-token.outputs.token }}
 
       - name: Read version
@@ -93,6 +101,7 @@ jobs:
           cargo set-version --bump patch
           git add Cargo.toml Cargo.lock
           git commit -m "chore: bump version to $(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')"
+          git pull --rebase origin main
           git push
 
   push-dev:
@@ -125,6 +134,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: main
 
       - name: Read version
         id: version
