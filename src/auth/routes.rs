@@ -551,7 +551,7 @@ async fn resend_verification(
         let user = repo::find_by_id(&state.db, auth.user_id)
             .await?
             .ok_or_else(|| {
-                AppError::Internal(anyhow::anyhow!(
+                AppError::Internal(anyhow!(
                     "authenticated user {} not found during verification resend",
                     auth.user_id
                 ))
@@ -621,7 +621,7 @@ async fn oauth_apple(
                 repo::find_by_oauth(&state.db, "apple", &claims.sub)
                     .await?
                     .ok_or_else(|| {
-                        AppError::Internal(anyhow::anyhow!(
+                        AppError::Internal(anyhow!(
                             "oauth identity race resolved but no row found for sub {}",
                             claims.sub
                         ))
@@ -714,7 +714,7 @@ async fn oauth_apple_complete(
             let user = repo::find_by_oauth(&state.db, "apple", &claims.sub)
                 .await?
                 .ok_or_else(|| {
-                    AppError::Internal(anyhow::anyhow!(
+                    AppError::Internal(anyhow!(
                         "oauth identity race resolved but no row found for sub {}",
                         claims.sub
                     ))
@@ -795,7 +795,7 @@ async fn verify_apple_identity_with_email(
             .map_err(|_| AppError::Unauthorized)?;
 
     let email = claims.email.clone().ok_or_else(|| {
-        AppError::Internal(anyhow::anyhow!(
+        AppError::Internal(anyhow!(
             "apple identity token for sub {} missing required email claim",
             claims.sub
         ))
