@@ -8,9 +8,9 @@ use chrono::{Duration as ChronoDuration, Utc};
 use std::sync::LazyLock;
 use std::time::Duration as StdDuration;
 use tokio::time;
-use tower_governor::GovernorLayer;
 use tower_governor::governor::GovernorConfigBuilder;
 use tower_governor::key_extractor::SmartIpKeyExtractor;
+use tower_governor::{GovernorError, GovernorLayer};
 use tracing::error;
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
@@ -180,7 +180,18 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(oauth_apple))
         .routes(routes!(oauth_apple_complete))
         .routes(routes!(username_available))
-        .layer(GovernorLayer::new(governor_conf))
+        .layer(GovernorLayer::new(governor_conf).error_handler(rate_limit_error))
+}
+
+// The limiter runs as a layer ahead of the handlers, so its errors never reach AppError on their own.
+fn rate_limit_error(e: GovernorError) -> Response {
+    match e {
+        GovernorError::TooManyRequests { wait_time, .. } => AppError::TooManyRequests {
+            retry_after_secs: wait_time,
+        },
+        other => AppError::Internal(anyhow::anyhow!(other)),
+    }
+    .into_response()
 }
 
 #[utoipa::path(
@@ -907,7 +918,34 @@ async fn issue_password_reset_token(
 
 #[cfg(test)]
 mod tests {
-    use super::is_valid_email;
+    use super::{is_valid_email, rate_limit_error};
+    use axum::body;
+    use axum::http::{StatusCode, header::RETRY_AFTER};
+    use tower_governor::GovernorError;
+
+    #[tokio::test]
+    async fn rate_limit_response_uses_error_shape() {
+        let response = rate_limit_error(GovernorError::TooManyRequests {
+            wait_time: 7,
+            headers: None,
+        });
+
+        assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(response.headers()[RETRY_AFTER], "7");
+
+        let bytes = body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body is readable");
+        let json: serde_json::Value = serde_json::from_slice(&bytes).expect("body is JSON");
+        assert_eq!(json["error"]["code"], "TOO_MANY_REQUESTS");
+        assert!(json["error"]["message"].is_string());
+    }
+
+    #[test]
+    fn unextractable_key_is_an_internal_error() {
+        let response = rate_limit_error(GovernorError::UnableToExtractKey);
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
 
     #[test]
     fn valid_emails_are_accepted() {
