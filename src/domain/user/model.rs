@@ -128,6 +128,10 @@ pub struct RefreshRequest {
 pub struct AuthResponse {
     pub access_token: String,
     pub refresh_token: String,
+    /// Seconds until the access token expires, relative to this response.
+    pub expires_in: i64,
+    /// Seconds until the refresh token expires, relative to this response.
+    pub refresh_expires_in: i64,
     pub user: UserResponse,
 }
 
