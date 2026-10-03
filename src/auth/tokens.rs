@@ -23,6 +23,8 @@ pub fn build_auth_response(
     AuthResponse {
         access_token,
         refresh_token,
+        expires_in: ACCESS_TOKEN_SECS,
+        refresh_expires_in: REFRESH_TOKEN_SECS,
         user: UserResponse::from(user),
     }
 }
