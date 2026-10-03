@@ -1,3 +1,4 @@
+use anyhow::anyhow;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::{
@@ -189,7 +190,7 @@ fn rate_limit_error(e: GovernorError) -> Response {
         GovernorError::TooManyRequests { wait_time, .. } => AppError::TooManyRequests {
             retry_after_secs: wait_time,
         },
-        other => AppError::Internal(anyhow::anyhow!(other)),
+        other => AppError::Internal(anyhow!(other)),
     }
     .into_response()
 }
